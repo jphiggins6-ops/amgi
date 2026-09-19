@@ -3,6 +3,7 @@
 //  DecksFeature
 //
 
+import OSLog
 import AnkiClients
 import AnkiKit
 import AppCore
