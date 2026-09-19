@@ -246,4 +246,99 @@ private import SwiftProtobuf
 
         #expect(decoded == nil)
     }
+
+    // MARK: - filtered decks
+
+    @Test func filteredDeckTemplate_dispatches_and_defaults_to_a_new_deck() throws {
+        let envelope: Request<FilteredDeckTemplate> = .filteredDeckTemplate()
+        #expect(envelope.serviceId == ServiceID.decks)
+        #expect(envelope.methodId == DecksMethod.getOrCreateFilteredDeck)
+        let proto = try Anki_Decks_DeckId(serializedBytes: envelope.body)
+        #expect(proto.did == 0, "DeckID(0) is what asks the backend for a blank template")
+    }
+
+    @Test func filteredDeckTemplate_encodes_an_existing_deck_id() throws {
+        let envelope: Request<FilteredDeckTemplate> = .filteredDeckTemplate(for: DeckID(77))
+        let proto = try Anki_Decks_DeckId(serializedBytes: envelope.body)
+        #expect(proto.did == 77)
+    }
+
+    @Test func addOrUpdateFilteredDeck_overlays_the_spec_onto_the_template() throws {
+        var backendDefaults = Anki_Decks_FilteredDeckForUpdate()
+        backendDefaults.name = "Filtered Deck 1"
+        backendDefaults.config.reschedule = true
+        backendDefaults.config.previewAgainSecs = 60
+        backendDefaults.config.searchTerms = [Anki_Decks_Deck.Filtered.SearchTerm()]
+        let template = FilteredDeckTemplate(bytes: try backendDefaults.serializedData())
+
+        let spec = FilteredDeckSpec(
+            name: "Leeches",
+            searchTerms: [
+                FilteredDeckSearchTerm(search: "is:due tag:leech", limit: 25, order: .lapses)
+            ],
+            reschedule: false
+        )
+        let envelope: Request<DeckCreation> = .addOrUpdateFilteredDeck(template: template, spec: spec)
+
+        #expect(envelope.serviceId == ServiceID.decks)
+        #expect(envelope.methodId == DecksMethod.addOrUpdateFilteredDeck)
+
+        let sent = try Anki_Decks_FilteredDeckForUpdate(serializedBytes: envelope.body)
+        #expect(sent.id == 0)
+        #expect(sent.name == "Leeches")
+        #expect(sent.allowEmpty == false)
+        #expect(sent.config.reschedule == false)
+        #expect(sent.config.searchTerms.count == 1)
+        #expect(sent.config.searchTerms[0].search == "is:due tag:leech")
+        #expect(sent.config.searchTerms[0].limit == 25)
+        #expect(sent.config.searchTerms[0].order == .lapses)
+        #expect(
+            sent.config.previewAgainSecs == 60,
+            "fields the Swift mirror doesn't model must survive the round trip"
+        )
+    }
+
+    @Test func addOrUpdateFilteredDeck_carries_an_existing_id_for_an_update() throws {
+        let template = FilteredDeckTemplate(bytes: try Anki_Decks_FilteredDeckForUpdate().serializedData())
+        var spec = FilteredDeckSpec(
+            name: "Leeches",
+            searchTerms: [FilteredDeckSearchTerm(search: "is:due tag:leech")],
+            allowEmpty: true
+        )
+        spec.id = DeckID(1234)
+
+        let envelope: Request<DeckCreation> = .addOrUpdateFilteredDeck(template: template, spec: spec)
+        let sent = try Anki_Decks_FilteredDeckForUpdate(serializedBytes: envelope.body)
+        #expect(sent.id == 1234)
+        #expect(sent.allowEmpty)
+    }
+
+    @Test func addOrUpdateFilteredDeck_decodes_OpChangesWithId_into_DeckCreation() throws {
+        var resp = Anki_Collection_OpChangesWithId()
+        resp.id = 4242
+        resp.changes.deck = true
+        resp.changes.studyQueues = true
+        let bytes = try resp.serializedData()
+
+        let template = FilteredDeckTemplate(bytes: try Anki_Decks_FilteredDeckForUpdate().serializedData())
+        let envelope: Request<DeckCreation> = .addOrUpdateFilteredDeck(
+            template: template,
+            spec: FilteredDeckSpec(name: "Leeches", searchTerms: [FilteredDeckSearchTerm(search: "is:due")])
+        )
+        let creation = try envelope.decode(bytes)
+        #expect(creation.id == DeckID(4242))
+        #expect(creation.changes == CollectionChanges(deck: true, studyQueues: true))
+    }
+
+    @Test func filteredDeckOrder_rawValues_match_the_proto_enum() {
+        for order in FilteredDeckOrder.allCases {
+            let wire = Anki_Decks_Deck.Filtered.SearchTerm.Order(rawValue: Int(order.rawValue))
+            #expect(wire != nil, "FilteredDeckOrder.\(order) has no matching proto case")
+            #expect(wire?.rawValue == Int(order.rawValue))
+        }
+        #expect(
+            FilteredDeckOrder.allCases.count == Anki_Decks_Deck.Filtered.SearchTerm.Order.allCases.count,
+            "the proto gained an order the AnkiKit mirror hasn't picked up"
+        )
+    }
 }

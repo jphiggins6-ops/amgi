@@ -17,6 +17,7 @@ What Amgi does today. For how it is put together, see [ARCHITECTURE.md](ARCHITEC
 - **Deck detail** — per-deck counts, retention, average cards/day, mature card count, and subdeck breakdown.
 - **Per-deck study options** — FSRS weights editor with optimizer and simulator, preset CRUD, Easy Days, bury rules, review timer, auto-advance.
 - **Custom study and filtered decks** — extend today's new-card and review limits per deck, and rebuild or empty a filtered deck to return its cards to their home decks.
+- **Filtered deck presets** — save named searches (query, card limit, gather order, reschedule flag) and build any selection of them into filtered decks in one tap. Presets are app-local and per profile; the decks they build are ordinary Anki filtered decks and sync like any other.
 - **Import** — `.apkg` and `.colpkg` import, including from the iOS share sheet, with progress shown while it runs.
 
 ## Notes

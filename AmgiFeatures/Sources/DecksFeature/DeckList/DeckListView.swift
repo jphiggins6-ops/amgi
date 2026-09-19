@@ -24,6 +24,7 @@ package struct DeckListView: View {
     @State private var model: DeckListModel
     @State private var showCreateSheet = false
     @State private var showBrowse = false
+    @State private var showFilteredDecks = false
     @State private var renameTarget: DeckRowViewData?
     @State private var pendingDeck: DeckInfo?
     @State private var accounts = AccountStore.shared
@@ -75,6 +76,9 @@ package struct DeckListView: View {
             BrowseView()
         }
         #endif
+        .navigationDestination(isPresented: $showFilteredDecks) {
+            FilteredDeckPresetsView()
+        }
         .toolbar { toolbarContent }
         .sheet(isPresented: $showCreateSheet) {
             CreateDeckSheet {
@@ -115,6 +119,11 @@ package struct DeckListView: View {
                     Label("Browse Notes", systemImage: "doc.text")
                 }
                 #endif
+                Button {
+                    showFilteredDecks = true
+                } label: {
+                    Label("Filtered Decks…", systemImage: "line.3.horizontal.decrease.circle")
+                }
                 Button(action: onImport) {
                     Label("Import Deck…", systemImage: "square.and.arrow.down")
                 }

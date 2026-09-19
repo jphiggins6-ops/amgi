@@ -56,6 +56,8 @@ enum DecksMethod {
     static let getDeckNames: UInt32 = 13
     static let removeDecks: UInt32 = 16
     static let renameDeck: UInt32 = 18
+    static let getOrCreateFilteredDeck: UInt32 = 19
+    static let addOrUpdateFilteredDeck: UInt32 = 20
     static let setCurrentDeck: UInt32 = 22
     static let getCurrentDeck: UInt32 = 23
 }

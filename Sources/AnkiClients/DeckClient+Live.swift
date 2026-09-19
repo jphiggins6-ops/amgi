@@ -45,6 +45,13 @@ extension DeckClient: DependencyKey {
             delete: { deckId in
                 try await backendOffload { try decks.removeDeck(deckId) }
             },
+            createFilteredDeck: { spec in
+                try await backendOffload {
+                    let creation = try decks.createFilteredDeck(spec)
+                    logger.info("Built filtered deck \(creation.id) '\(spec.name)' from \(spec.searchTerms.count) search term(s)")
+                    return creation
+                }
+            },
             rebuildFilteredDeck: { deckId in
                 try await backendOffload {
                     let count = try decks.rebuildFilteredDeck(deckId)

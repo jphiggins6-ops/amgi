@@ -17,6 +17,9 @@ public struct DeckClient: Sendable {
     public var create: @Sendable (_ name: String) async throws -> DeckCreation
     public var rename: @Sendable (_ deckId: DeckID, _ name: String) async throws -> CollectionChanges
     public var delete: @Sendable (_ deckId: DeckID) async throws -> CollectionChanges
+    /// Creates a filtered deck, or updates and rebuilds the one named by
+    /// `spec.id`. The engine gathers the cards in the same call.
+    public var createFilteredDeck: @Sendable (_ spec: FilteredDeckSpec) async throws -> DeckCreation
     public var rebuildFilteredDeck: @Sendable (_ deckId: DeckID) async throws -> Int
     public var emptyFilteredDeck: @Sendable (_ deckId: DeckID) async throws -> Void
     /// Raises today's new/review limits for a deck by the given deltas —

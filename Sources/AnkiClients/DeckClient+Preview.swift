@@ -19,6 +19,7 @@ extension DeckClient {
         create: { _ in DeckCreation(id: DeckID(999), changes: CollectionChanges()) },
         rename: { _, _ in CollectionChanges() },
         delete: { _ in CollectionChanges() },
+        createFilteredDeck: { _ in DeckCreation(id: DeckID(998), changes: CollectionChanges(deck: true)) },
         rebuildFilteredDeck: { _ in 0 },
         emptyFilteredDeck: { _ in },
         extendLimits: { _, _, _ in },

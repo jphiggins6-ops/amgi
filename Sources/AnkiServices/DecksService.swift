@@ -22,6 +22,12 @@ public struct DecksService: Sendable {
     public var createDeck: @Sendable (_ name: String) throws -> DeckCreation
     public var renameDeck: @Sendable (_ deckId: DeckID, _ name: String) throws -> CollectionChanges
     public var removeDeck: @Sendable (_ deckId: DeckID) throws -> CollectionChanges
+    /// Creates a filtered deck, or — when `spec.id` names an existing one —
+    /// updates and rebuilds it in place. Two-phase like `createDeck`: the
+    /// backend hands back a template carrying its own defaults, which the
+    /// spec overrides rather than reconstructs. The backend gathers the
+    /// cards in the same call, so no `rebuildFilteredDeck` follows.
+    public var createFilteredDeck: @Sendable (_ spec: FilteredDeckSpec) throws -> DeckCreation
     public var rebuildFilteredDeck: @Sendable (_ deckId: DeckID) throws -> Int
     public var emptyFilteredDeck: @Sendable (_ deckId: DeckID) throws -> Void
     /// Raises today's new/review limits for a deck by the given deltas —
@@ -87,6 +93,26 @@ extension DecksService: DependencyKey {
             },
             removeDeck: { deckId in
                 try backend.invoke(.removeDecks(deckIds: [deckId]))
+            },
+            createFilteredDeck: { spec in
+                let name = spec.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else {
+                    throw BackendError(kind: .invalidInput, message: "Filtered deck name can't be empty")
+                }
+                // An empty search matches the whole collection, which is
+                // never what a blank field meant — drop the blanks and
+                // refuse the call rather than gathering everything.
+                let terms = spec.searchTerms.filter {
+                    !$0.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }
+                guard !terms.isEmpty else {
+                    throw BackendError(kind: .invalidInput, message: "A filtered deck needs at least one search")
+                }
+                var resolved = spec
+                resolved.name = name
+                resolved.searchTerms = terms
+                let template = try backend.invoke(.filteredDeckTemplate(for: spec.id))
+                return try backend.invoke(.addOrUpdateFilteredDeck(template: template, spec: resolved))
             },
             rebuildFilteredDeck: { deckId in
                 try backend.invoke(.rebuildFilteredDeck(deckId: deckId))

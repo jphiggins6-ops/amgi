@@ -204,6 +204,70 @@ extension Request where Response == DeckCreation {
     }
 }
 
+// MARK: - filtered decks (two-phase create/update)
+
+extension Request where Response == FilteredDeckTemplate {
+    /// Returns the backend's `FilteredDeckForUpdate` for `deckId`.
+    ///
+    /// `DeckID(0)` — the default — asks for a blank one carrying the
+    /// engine's own defaults (reschedule, preview delays, a starter
+    /// search term). Passing an existing filtered deck's id returns that
+    /// deck's current config instead, which is how an update keeps the
+    /// fields no Swift mirror models. Pair with
+    /// `Request.addOrUpdateFilteredDeck(template:spec:)` to persist.
+    public static func filteredDeckTemplate(for deckId: DeckID = DeckID(0)) -> Self {
+        Self(
+            serviceId: ServiceID.decks,
+            methodId: DecksMethod.getOrCreateFilteredDeck,
+            encode: {
+                var proto = Anki_Decks_DeckId()
+                proto.did = deckId.rawValue
+                return try proto.serializedData()
+            },
+            decode: { bytes in FilteredDeckTemplate(bytes: bytes) }
+        )
+    }
+}
+
+extension Request where Response == DeckCreation {
+    /// Overlays `spec` onto the template and persists it. The backend
+    /// gathers the cards as part of the same call, so no separate rebuild
+    /// follows; `spec.id` of `DeckID(0)` creates, anything else updates
+    /// that deck in place. Returns the deck's id plus the invalidation
+    /// payload.
+    public static func addOrUpdateFilteredDeck(
+        template: FilteredDeckTemplate,
+        spec: FilteredDeckSpec
+    ) -> Self {
+        Self(
+            serviceId: ServiceID.decks,
+            methodId: DecksMethod.addOrUpdateFilteredDeck,
+            encode: {
+                var proto = try Anki_Decks_FilteredDeckForUpdate(serializedBytes: template.bytes)
+                proto.id = spec.id.rawValue
+                proto.name = spec.name
+                proto.allowEmpty = spec.allowEmpty
+                proto.config.reschedule = spec.reschedule
+                proto.config.searchTerms = spec.searchTerms.map { term in
+                    var searchTerm = Anki_Decks_Deck.Filtered.SearchTerm()
+                    searchTerm.search = term.search
+                    searchTerm.limit = UInt32(clamping: term.limit)
+                    searchTerm.order = .init(rawValue: Int(term.order.rawValue)) ?? .oldestReviewedFirst
+                    return searchTerm
+                }
+                return try proto.serializedData()
+            },
+            decode: { bytes in
+                let resp = try Anki_Collection_OpChangesWithId(serializedBytes: bytes)
+                return DeckCreation(
+                    id: DeckID(resp.id),
+                    changes: CollectionChanges(resp.changes)
+                )
+            }
+        )
+    }
+}
+
 extension DeckTreeNode {
     /// Maps a proto deck-tree node into the `AnkiKit` mirror, joining
     /// `fullName` paths recursively. `parentPath` is the joined path of

@@ -70,4 +70,45 @@ import AnkiKit
             #expect(counts.total == 1)
         }
     }
+
+    @Test func filteredDeck_buildsFromASearch_andUpdatesInPlace() throws {
+        try withScratchCollection("decks-filtered") { backend, _ in
+            // A filtered deck that gathers nothing is refused (allowEmpty
+            // defaults to false), so the probe needs a card to find.
+            let names = try backend.invoke(.notetypeNames)
+            let basic = try #require(names.first { $0.name == "Basic" })
+            var note = try backend.invoke(.newNote(notetypeId: basic.id))
+            note.fields[0] = "front"
+            note.fields[1] = "back"
+            try backend.invoke(.addNote(template: note, deckId: DeckID(1)))
+
+            let template = try backend.invoke(.filteredDeckTemplate())
+            let spec = FilteredDeckSpec(
+                name: "Probe Filtered",
+                searchTerms: [FilteredDeckSearchTerm(search: "is:new", limit: 10, order: .added)]
+            )
+            let created = try backend.invoke(.addOrUpdateFilteredDeck(template: template, spec: spec))
+            #expect(created.id != DeckID(0))
+            #expect(created.changes.deck, "creating a filtered deck must report the deck facet dirty")
+
+            let tree = try backend.invoke(.deckTree(at: Date()))
+            let node = try #require(tree.find(created.id), "the new filtered deck must be in the tree")
+            #expect(node.isFiltered)
+            #expect(node.fullName == "Probe Filtered")
+
+            // Re-running the same preset must refresh the one deck rather
+            // than add a second — that is the whole point of feeding the
+            // existing id back in.
+            let reloaded = try backend.invoke(.filteredDeckTemplate(for: created.id))
+            var update = spec
+            update.id = created.id
+            let updated = try backend.invoke(.addOrUpdateFilteredDeck(template: reloaded, spec: update))
+            #expect(updated.id == created.id)
+
+            let filteredDecks = try backend.invoke(.deckTree(at: Date()))
+                .flattened()
+                .filter(\.isFiltered)
+            #expect(filteredDecks.count == 1)
+        }
+    }
 }

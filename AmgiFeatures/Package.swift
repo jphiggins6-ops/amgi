@@ -73,7 +73,10 @@ let package = Package(
         ),
         .testTarget(
             name: "AppCoreTests",
-            dependencies: ["AppCore"],
+            dependencies: [
+                "AppCore",
+                .product(name: "AnkiKit", package: "amgi"),
+            ],
             swiftSettings: sharedSwiftSettings
         ),
         .target(
@@ -136,6 +139,7 @@ let package = Package(
             name: "DecksFeatureTests",
             dependencies: [
                 "DecksFeature",
+                "AppCore",
                 "AppShared",
                 .product(name: "UI", package: "AmgiUI"),
                 .product(name: "AnkiKit", package: "amgi"),
