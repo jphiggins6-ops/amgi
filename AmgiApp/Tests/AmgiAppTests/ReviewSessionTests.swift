@@ -493,4 +493,101 @@ import AnkiServices
             #expect(!s.isAdvancing, "prefetch must not hold the transition gate shut")
         }
     }
+
+    // MARK: - Card order: every due card before repeats
+
+    private static func card(_ id: Int64, queue: Int16) -> QueuedReviewCard {
+        QueuedReviewCard.preview(cardId: CardID(id), noteId: NoteID(100 + id), ord: 0, queue: queue)
+    }
+
+    /// The engine's order is learning cards due now, the main queue, then
+    /// learning cards inside the learn-ahead window.
+    @Test func repeatsWaitUntilEveryOtherDueCardHasBeenShown() {
+        let engineOrder = [
+            Self.card(1, queue: 1),  // relearning, due now
+            Self.card(2, queue: 4),  // preview repeat
+            Self.card(3, queue: 2),  // review
+            Self.card(4, queue: 0),  // new
+            Self.card(5, queue: 3),  // interday learning
+            Self.card(6, queue: 1),  // learning, due within learn-ahead
+        ]
+        let arranged = ReviewQueueOrder.arranged(engineOrder, defersRepeats: true)
+        #expect(arranged.map(\.card.id.rawValue) == [3, 4, 5, 1, 2, 6])
+    }
+
+    @Test func repeatsAreShownOnceNothingElseIsDue() {
+        let engineOrder = [Self.card(1, queue: 1), Self.card(2, queue: 1)]
+        let arranged = ReviewQueueOrder.arranged(engineOrder, defersRepeats: true)
+        #expect(arranged.map(\.card.id.rawValue) == [1, 2])
+    }
+
+    @Test func switchedOffKeepsTheEngineOrder() {
+        let engineOrder = [Self.card(1, queue: 1), Self.card(2, queue: 2)]
+        let arranged = ReviewQueueOrder.arranged(engineOrder, defersRepeats: false)
+        #expect(arranged.map(\.card.id.rawValue) == [1, 2])
+    }
+
+    /// Card 1 was missed earlier and is due again; card 2 hasn't been seen.
+    @Test(arguments: [true, false])
+    func startOpensOnAnUnseenCardBeforeARepeat(defersRepeats: Bool) async throws {
+        let missed = Self.card(1, queue: 1)
+        let unseen = Self.card(2, queue: 2)
+        try await withDependencies {
+            $0.decksService.setCurrentDeck = { _ in }
+            $0.schedulerService.getQueuedCards = { _ in
+                QueuedCardsResult(cards: [missed, unseen], newCount: 0, learningCount: 1, reviewCount: 1)
+            }
+            $0.notesService.getNote = { id in
+                NoteRecord(id: id, guid: "g", mid: NotetypeID(200), mod: 0, flds: "", sfld: "", csum: 0)
+            }
+            $0.cardRenderingService.renderCard = { _ in
+                RenderedCard(frontHTML: "f", backHTML: "b", cardCSS: "")
+            }
+        } operation: {
+            let s = ReviewSession(deckId: DeckID(1))
+            s.defersRepeats = defersRepeats
+            s.start()
+            try await pollUntil { s.currentCardId != nil && !s.isAdvancing }
+            #expect(s.currentCardId == (defersRepeats ? unseen : missed).card.id)
+        }
+    }
+
+    /// Missing card 2 sends it back into learning behind card 1; card 3,
+    /// not yet seen, still comes next.
+    @Test func answerMovesOnToAnUnseenCardBeforeAnyRepeat() async throws {
+        let missedEarlier = Self.card(1, queue: 1)
+        let current = Self.card(2, queue: 2)
+        let missedNow = Self.card(2, queue: 1)
+        let unseen = Self.card(3, queue: 2)
+
+        final class Box: @unchecked Sendable { var answered = false }
+        let box = Box()
+
+        try await withDependencies {
+            $0.decksService.setCurrentDeck = { _ in }
+            $0.schedulerService.getQueuedCards = { _ in
+                box.answered
+                    ? QueuedCardsResult(cards: [missedEarlier, missedNow, unseen], newCount: 0, learningCount: 2, reviewCount: 1)
+                    : QueuedCardsResult(cards: [missedEarlier, current, unseen], newCount: 0, learningCount: 1, reviewCount: 2)
+            }
+            $0.schedulerService.answerReviewCard = { _, _, _, _ in box.answered = true }
+            $0.notesService.getNote = { id in
+                NoteRecord(id: id, guid: "g", mid: NotetypeID(200), mod: 0, flds: "", sfld: "", csum: 0)
+            }
+            $0.cardRenderingService.renderCard = { _ in
+                RenderedCard(frontHTML: "f", backHTML: "b", cardCSS: "")
+            }
+        } operation: {
+            let s = ReviewSession(deckId: DeckID(1))
+            s.defersRepeats = true
+            s.start()
+            try await pollUntil { s.currentCardId == current.card.id && !s.isAdvancing }
+            #expect(s.currentCardId == current.card.id)
+
+            s.answer(rating: .again)
+            try await pollUntil { s.currentCardId == unseen.card.id && !s.isAdvancing }
+            #expect(s.currentCardId == unseen.card.id)
+            #expect(s.sessionStats.reviewed == 1)
+        }
+    }
 }

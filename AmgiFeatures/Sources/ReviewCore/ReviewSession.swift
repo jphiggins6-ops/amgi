@@ -64,6 +64,8 @@ public final class ReviewSession {
 
     var reviewStartTime: ContinuousClock.Instant = .now
     var cardQueue: [QueuedReviewCard] = []
+    /// Read once per session; see `ReviewQueueOrder`.
+    @ObservationIgnored var defersRepeats: Bool = ReviewPreferences.defersRepeats
     var notetypeCache: [NotetypeID: Notetype] = [:]
     var currentQueuedCard: QueuedReviewCard?
     private var lastRating: Rating? = nil
@@ -157,7 +159,7 @@ public final class ReviewSession {
                     let name = (try? decks.getCurrentDeck().name) ?? ""
                     return (try scheduler.getQueuedCards(200), name)
                 }.value
-                cardQueue = queue.cards
+                cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats)
                 deckName = name
                 remainingCounts = DeckCounts(
                     newCount: queue.newCount,
@@ -248,7 +250,7 @@ public final class ReviewSession {
                     lastRating = rating
                     canUndo = true
 
-                    cardQueue = queue.cards
+                    cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats)
                     remainingCounts = DeckCounts(
                         newCount: queue.newCount,
                         learnCount: queue.learningCount,
@@ -303,7 +305,7 @@ public final class ReviewSession {
                 }
                 lastRating = nil
 
-                cardQueue = queue.cards
+                cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats)
                 remainingCounts = DeckCounts(
                     newCount: queue.newCount,
                     learnCount: queue.learningCount,

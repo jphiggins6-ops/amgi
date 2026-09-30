@@ -33,6 +33,14 @@ public enum ReviewPreferences {
         public static let cardContentAlignment = "review_pref_card_content_alignment"
         public static let glassAnswerButtons = "review_pref_glass_answer_buttons"
         public static let autoMatchCardBackground = "review_pref_auto_match_card_background"
+        public static let defersRepeats = "review_pref_defers_repeats"
+    }
+
+    /// Whether a review shows every due card once before bringing back
+    /// cards still in (re)learning today. On unless switched off in
+    /// Settings; the watch has no toggle and always gets the default.
+    public static var defersRepeats: Bool {
+        UserDefaults.standard.object(forKey: Keys.defersRepeats) as? Bool ?? true
     }
 }
 

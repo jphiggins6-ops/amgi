@@ -6,6 +6,7 @@ What Amgi does today. For how it is put together, see [ARCHITECTURE.md](ARCHITEC
 
 - **FSRS scheduling** — the official Rust FSRS engine, not a reimplementation. Ratings, intervals, and review history are computed by the same code as Anki Desktop.
 - **Review session** — Again/Hard/Good/Easy with the next interval printed on every button, session progress, rating toast with auto-advance, native typed-answer field, tap-to-play audio, and undo.
+- **Every due card before repeats** — on by default: a card you miss, or one still in learning, waits until every other due card has been shown once. Only the order changes; the engine still schedules each answer when you give it. Settings → Review → Card Order switches back to Anki's usual order.
 - **Keyboard control** — rate, reveal, and undo from a hardware keyboard, with the typed-answer field staying up across the reveal.
 - **Dual card rendering** — the Rust template engine renders cards exactly like desktop clients. Simple cards are auto-detected and drawn by a native SwiftUI renderer; complex cards fall back to a sandboxed WebKit host. A per-card chip shows which path is active, and the render mode can be pinned per template.
 - **MathJax and audio** — formula rendering and card audio playback in both renderers.

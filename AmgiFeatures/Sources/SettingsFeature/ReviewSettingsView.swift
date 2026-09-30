@@ -31,14 +31,33 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.playAudioInSilentMode))
     private var playAudioInSilentMode: Bool = false
 
+    @Shared(.appStorage(ReviewPreferences.Keys.defersRepeats))
+    private var defersRepeats: Bool = true
+
     var body: some View {
         SettingsPage {
+            cardOrderSection
             cardDisplaySection
             answerButtonsSection
             audioSection
         }
         .navigationTitle("Review")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var cardOrderSection: some View {
+        Group {
+            SettingsSectionHeader(title: "Card Order")
+            SettingsGroup {
+                SettingsToggleRow(
+                    title: "See every due card before repeats",
+                    systemImage: "repeat",
+                    tone: .learning,
+                    isOn: Binding($defersRepeats)
+                )
+            }
+            SettingsFootnote("Cards you miss, and cards you're still learning, come back only after every other due card has had its turn. Turn off for Anki's usual order, where a card you miss can come back within minutes.")
+        }
     }
 
     private var cardDisplaySection: some View {

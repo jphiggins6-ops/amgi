@@ -23,13 +23,19 @@ than reported as "already complete".
 
 ```
 1. SetCurrentDeck(deckId)                     — tell Rust which deck
-2. GetQueuedCards(fetchLimit: 1)              — next card + scheduling states
+2. GetQueuedCards(fetchLimit: 200)            — upcoming cards + scheduling states
 3. RenderExistingCard(cardId, browser: false) — rendered HTML
 4. Display the card (native renderer or WKWebView)
 5. User taps a rating button
 6. AnswerCard(cardId, currentState, newState, rating, millisTaken)
 7. Go to step 2
 ```
+
+The reviewer shows the first card in that list, except that by default cards in
+intraday learning (queues 1 and 4) move behind the rest, so every due card is
+seen once before any repeat (`ReviewQueueOrder`). The engine accepts an answer
+for any learning card or for the head of its main queue, so either pick can be
+answered.
 
 The `QueuedCard` protobuf carries `SchedulingStates` with `current`, `again`,
 `hard`, `good` and `easy`. The chosen rating's state becomes `new_state` in

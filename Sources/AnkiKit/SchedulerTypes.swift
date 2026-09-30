@@ -48,13 +48,14 @@ public struct QueuedReviewCard: Sendable {
     }
 
     /// Convenience factory for tests and SwiftUI previews.
-    public static func preview(cardId: CardID, noteId: NoteID, ord: Int32) -> QueuedReviewCard {
+    /// `queue` is the card's Anki queue: 0 new, 1 learning, 2 review.
+    public static func preview(cardId: CardID, noteId: NoteID, ord: Int32, queue: Int16 = 0) -> QueuedReviewCard {
         let emptyToken = SchedulingStateToken(Data())
         let states = ReviewSchedulingStates(
             current: emptyToken, again: emptyToken,
             hard: emptyToken, good: emptyToken, easy: emptyToken
         )
-        let card = CardRecord(id: cardId, nid: noteId, did: DeckID(1), ord: ord, mod: 0)
+        let card = CardRecord(id: cardId, nid: noteId, did: DeckID(1), ord: ord, mod: 0, queue: queue)
         return QueuedReviewCard(card: card, states: states, nextIntervals: [:])
     }
 }
