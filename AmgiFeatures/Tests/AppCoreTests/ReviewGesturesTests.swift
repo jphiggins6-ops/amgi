@@ -10,19 +10,21 @@ import AnkiKit
 
 @Suite struct ReviewGesturesTests {
 
-    @Test(arguments: [
-        (0.10, 0.10, ReviewGesture.tapTopLeft),
-        (0.50, 0.10, .tapTopCenter),
-        (0.90, 0.10, .tapTopRight),
-        (0.10, 0.50, .tapMiddleLeft),
-        (0.50, 0.50, .tapCenter),
-        (0.90, 0.50, .tapMiddleRight),
-        (0.10, 0.90, .tapBottomLeft),
-        (0.50, 0.90, .tapBottomCenter),
-        (0.90, 0.90, .tapBottomRight),
-    ])
-    func aTapLandsInTheThirdItFallsIn(x: Double, y: Double, expected: ReviewGesture) {
-        #expect(ReviewGesture.tap(x: x, y: y) == expected)
+    @Test func aTapLandsInTheThirdItFallsIn() {
+        let cases: [(x: Double, y: Double, expected: ReviewGesture)] = [
+            (0.10, 0.10, .tapTopLeft),
+            (0.50, 0.10, .tapTopCenter),
+            (0.90, 0.10, .tapTopRight),
+            (0.10, 0.50, .tapMiddleLeft),
+            (0.50, 0.50, .tapCenter),
+            (0.90, 0.50, .tapMiddleRight),
+            (0.10, 0.90, .tapBottomLeft),
+            (0.50, 0.90, .tapBottomCenter),
+            (0.90, 0.90, .tapBottomRight),
+        ]
+        for tap in cases {
+            #expect(ReviewGesture.tap(x: tap.x, y: tap.y) == tap.expected, "tap at (\(tap.x), \(tap.y))")
+        }
     }
 
     @Test func tapsOnOrPastTheEdgeStayInTheEdgeAreas() {

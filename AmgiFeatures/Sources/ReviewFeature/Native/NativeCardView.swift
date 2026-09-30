@@ -25,7 +25,7 @@ struct NativeCardView: View {
     @Environment(\.palette) private var palette
     @State private var size: CGSize = .zero
     @State private var scrollOffset: CGFloat = 0
-    @State private var dragStartOffset: CGFloat?
+    @State private var dragStartOffset: CGFloat? = nil
 
     @ScaledMetric(relativeTo: .largeTitle) private var headwordFront: CGFloat = 48
     @ScaledMetric(relativeTo: .title) private var headwordBack: CGFloat = 34

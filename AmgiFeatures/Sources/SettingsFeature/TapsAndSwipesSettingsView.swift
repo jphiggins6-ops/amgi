@@ -13,7 +13,7 @@ import UI
 /// sits rather than by name.
 struct TapsAndSwipesSettingsView: View {
     @Environment(\.palette) private var palette
-    @State private var actions: [ReviewGesture: ReviewGestureAction] = Self.stored()
+    @State private var actions: [ReviewGesture: ReviewGestureAction] = TapsAndSwipesSettingsView.stored()
 
     var body: some View {
         SettingsPage {

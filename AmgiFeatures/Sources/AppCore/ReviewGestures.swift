@@ -31,7 +31,8 @@ public enum ReviewGesture: String, CaseIterable, Identifiable, Sendable {
     public static func tap(x: Double, y: Double) -> ReviewGesture {
         func third(_ value: Double) -> Int {
             guard value.isFinite else { return 1 }
-            return min(2, max(0, Int(value * 3)))
+            // Clamped before the conversion, which traps outside Int's range.
+            return Int(min(max(value, 0), 0.999) * 3)
         }
         return taps[third(y) * 3 + third(x)]
     }

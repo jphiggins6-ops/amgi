@@ -6,7 +6,7 @@
 //
 
 import AnkiClients
-import AnkiKit
+public import AnkiKit
 import Dependencies
 import Foundation
 public import Observation
