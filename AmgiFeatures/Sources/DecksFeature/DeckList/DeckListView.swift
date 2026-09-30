@@ -30,6 +30,9 @@ package struct DeckListView: View {
     @State private var studyNowDeckId: DeckID?
     @State private var isBuildingStudyNow = false
     @State private var studyNowError: String?
+    /// Emptying Study Now after a session; a new session waits for it, or
+    /// the late empty could clear the deck the new session just built.
+    @State private var finishingStudyNow: Task<Void, Never>?
     @State private var renameTarget: DeckRowViewData?
     @State private var pendingDeck: DeckInfo?
     @State private var accounts = AccountStore.shared
@@ -65,7 +68,8 @@ package struct DeckListView: View {
             state: model.state,
             selectedDeckID: pendingDeck?.id.rawValue,
             onRefresh: { await model.load() },
-            onStartReview: { Task { await startStudyNow() } },
+            onStartReviews: { Task { await startStudyNow(.reviews) } },
+            onStartNew: { Task { await startStudyNow(.newCards) } },
             onTapDeck: { row in pendingDeck = row.asDeckInfo },
             onDeleteDeck: { rawID in await model.delete(DeckID(rawID)) },
             onRenameDeck: { row in renameTarget = row },
@@ -89,9 +93,9 @@ package struct DeckListView: View {
         }
         .toolbar { toolbarContent }
         .fullScreenCover(item: $studyNowDeckId) { deckId in
-            ReviewView(deckId: deckId) {
+            ReviewView(deckId: deckId, countsNewCardsAgainstHomeDecks: true) {
                 studyNowDeckId = nil
-                store.invalidateAll()
+                finishingStudyNow = Task { await model.finishStudyNow(deckId) }
             }
         }
         .alert(
@@ -161,15 +165,16 @@ package struct DeckListView: View {
         }
     }
 
-    private func startStudyNow() async {
+    private func startStudyNow(_ kind: DeckListModel.StudyNowKind) async {
         guard !isBuildingStudyNow else { return }
         isBuildingStudyNow = true
         defer { isBuildingStudyNow = false }
+        await finishingStudyNow?.value
         do {
-            studyNowDeckId = try await model.buildStudyNowDeck()
+            studyNowDeckId = try await model.buildStudyNowDeck(kind)
         } catch {
-            // The engine refuses to build a filtered deck that gathers
-            // nothing — i.e. every due card is flagged or in "p".
+            // Nothing left to gather: the engine refuses to build a filtered
+            // deck from an empty search, and New throws before asking it.
             studyNowError = error.localizedDescription
         }
     }

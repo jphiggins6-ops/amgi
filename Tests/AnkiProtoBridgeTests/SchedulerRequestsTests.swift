@@ -97,6 +97,24 @@ private import SwiftProtobuf
         #expect(proto.reviewDelta == 50)
     }
 
+    // MARK: - updateStats
+
+    @Test func updateStats_dispatches_and_encodes_deckId_and_deltas() throws {
+        let envelope: Request<Void> = .updateStats(deckId: DeckID(55), newDelta: 3, reviewDelta: 0)
+        #expect(envelope.serviceId == ServiceID.scheduler)
+        #expect(envelope.methodId == SchedulerMethod.updateStats)
+        let proto = try Anki_Scheduler_UpdateStatsRequest(serializedBytes: envelope.body)
+        #expect(proto.deckID == 55)
+        #expect(proto.newDelta == 3)
+        #expect(proto.reviewDelta == 0)
+    }
+
+    @Test func updateStats_uses_the_offset_scheduler_method_id() {
+        // UpdateStats is the sixth SchedulerService RPC (index 5), plus the
+        // three methods the backend service prepends.
+        #expect(SchedulerMethod.updateStats == 8)
+    }
+
     // MARK: - scheduleCardsAsNew
 
     @Test func scheduleCardsAsNew_dispatches_and_encodes_ids_and_log_flag() throws {

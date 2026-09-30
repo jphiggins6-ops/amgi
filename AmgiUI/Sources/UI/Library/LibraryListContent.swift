@@ -21,7 +21,8 @@ public struct LibraryListContent: View {
     let state: State
     let selectedDeckID: Int64?
     let onRefresh: () async -> Void
-    let onStartReview: () -> Void
+    let onStartReviews: () -> Void
+    let onStartNew: () -> Void
     let onTapDeck: (DeckRowViewData) -> Void
     let onDeleteDeck: (Int64) async -> Void
     let onRenameDeck: (DeckRowViewData) -> Void
@@ -33,7 +34,8 @@ public struct LibraryListContent: View {
         state: State,
         selectedDeckID: Int64? = nil,
         onRefresh: @escaping () async -> Void,
-        onStartReview: @escaping () -> Void,
+        onStartReviews: @escaping () -> Void,
+        onStartNew: @escaping () -> Void,
         onTapDeck: @escaping (DeckRowViewData) -> Void,
         onDeleteDeck: @escaping (Int64) async -> Void,
         onRenameDeck: @escaping (DeckRowViewData) -> Void,
@@ -42,7 +44,8 @@ public struct LibraryListContent: View {
         self.state = state
         self.selectedDeckID = selectedDeckID
         self.onRefresh = onRefresh
-        self.onStartReview = onStartReview
+        self.onStartReviews = onStartReviews
+        self.onStartNew = onStartNew
         self.onTapDeck = onTapDeck
         self.onDeleteDeck = onDeleteDeck
         self.onRenameDeck = onRenameDeck
@@ -83,7 +86,8 @@ public struct LibraryListContent: View {
                 LibraryHeroCard(
                     data: hero,
                     activityPending: heatmap == nil,
-                    onStartReview: onStartReview
+                    onStartReviews: onStartReviews,
+                    onStartNew: onStartNew
                 )
                     .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 12, trailing: 0))
                     .listRowBackground(Color.clear)
@@ -220,7 +224,7 @@ private extension DeckRowViewData {
 
 private extension HeroData {
     static let samplePopulated = HeroData(
-        totalDue: 680, deckCount: 7, streak: 36,
+        reviewCount: 680, newCount: 20, streak: 36,
         last14Days: [3, 5, 2, 7, 6, 9, 4, 8, 6, 5, 7, 3, 8, 5]
     )
 }
@@ -233,7 +237,7 @@ private extension HeroData {
                 hero: .samplePopulated,
                 heatmap: .dense
             ),
-            onRefresh: {}, onStartReview: {},
+            onRefresh: {}, onStartReviews: {}, onStartNew: {},
             onTapDeck: { _ in }, onDeleteDeck: { _ in }, onRenameDeck: { _ in }, onCreateDeck: {}
         )
         .navigationTitle("Library")
@@ -249,7 +253,7 @@ private extension HeroData {
                 hero: .samplePopulated,
                 heatmap: .dense
             ),
-            onRefresh: {}, onStartReview: {},
+            onRefresh: {}, onStartReviews: {}, onStartNew: {},
             onTapDeck: { _ in }, onDeleteDeck: { _ in }, onRenameDeck: { _ in }, onCreateDeck: {}
         )
         .navigationTitle("Library")
@@ -262,11 +266,11 @@ private extension HeroData {
         LibraryListContent(
             state: .loaded(
                 rows: [.sampleEspanol],
-                hero: HeroData(totalDue: 0, deckCount: 1, streak: 12,
+                hero: HeroData(reviewCount: 0, newCount: 0, streak: 12,
                                last14Days: Array(repeating: 0, count: 14)),
                 heatmap: .sparse
             ),
-            onRefresh: {}, onStartReview: {},
+            onRefresh: {}, onStartReviews: {}, onStartNew: {},
             onTapDeck: { _ in }, onDeleteDeck: { _ in }, onRenameDeck: { _ in }, onCreateDeck: {}
         )
         .navigationTitle("Library")
@@ -278,7 +282,7 @@ private extension HeroData {
     NavigationStack {
         LibraryListContent(
             state: .loading,
-            onRefresh: {}, onStartReview: {},
+            onRefresh: {}, onStartReviews: {}, onStartNew: {},
             onTapDeck: { _ in }, onDeleteDeck: { _ in }, onRenameDeck: { _ in }, onCreateDeck: {}
         )
         .navigationTitle("Library")
@@ -290,7 +294,7 @@ private extension HeroData {
     NavigationStack {
         LibraryListContent(
             state: .empty,
-            onRefresh: {}, onStartReview: {},
+            onRefresh: {}, onStartReviews: {}, onStartNew: {},
             onTapDeck: { _ in }, onDeleteDeck: { _ in }, onRenameDeck: { _ in }, onCreateDeck: {}
         )
         .navigationTitle("Library")

@@ -8,20 +8,20 @@
 public import SwiftUI
 import Theme
 
-/// Library hero card. Built on `AmgiHeroSummary`. Wraps it to supply the
-/// streak pill (top-right decoration slot) and the CTA + sparkline
-/// (footer slot).
+/// Library hero card: today's two study buttons, Reviews and New, each
+/// with its own count, under the streak pill and over the 14-day sparkline.
 ///
-/// `data.totalDue == 0` disables the CTA; the rest still renders so
-/// the user sees their streak + sparkline.
+/// A button whose count is 0 is disabled; the rest still renders so the
+/// user sees their streak and sparkline.
 public struct LibraryHeroCard: View {
     let data: HeroData
-    let onStartReview: () -> Void
+    let onStartReviews: () -> Void
+    let onStartNew: () -> Void
     /// True while the review-history fetch that feeds `streak` and
-    /// `last14Days` is still in flight. `totalDue` and `deckCount` come from
-    /// the deck tree and are real immediately, so the card renders at once and
-    /// only the history-derived decorations are shown as placeholders — a
-    /// confident "0 day streak" that flips to 36 a second later is a worse
+    /// `last14Days` is still in flight. The counts come from the deck tree
+    /// and a search, and are real immediately, so the card renders at once
+    /// and only the history-derived decorations are shown as placeholders —
+    /// a confident "0 day streak" that flips to 36 a second later is a worse
     /// answer than an obvious placeholder.
     let activityPending: Bool
 
@@ -30,46 +30,47 @@ public struct LibraryHeroCard: View {
     public init(
         data: HeroData,
         activityPending: Bool = false,
-        onStartReview: @escaping () -> Void
+        onStartReviews: @escaping () -> Void,
+        onStartNew: @escaping () -> Void
     ) {
         self.data = data
         self.activityPending = activityPending
-        self.onStartReview = onStartReview
+        self.onStartReviews = onStartReviews
+        self.onStartNew = onStartNew
     }
 
     public var body: some View {
-        AmgiHeroSummary(
-            eyebrow: "Due today",
-            bigNumber: "\(data.totalDue)",
-            subtitle: subtitleText,
-            background: heroGradient,
-            decoration: {
-                StreakBadge(days: data.streak)
-                    .redacted(reason: activityPending ? .placeholder : [])
-            },
-            footer: {
-                VStack(spacing: 12) {
-                    Button(action: onStartReview) {
-                        Label("Start today's review", systemImage: "play.fill")
-                            .frame(maxWidth: .infinity)
-                            .amgiFont(size: 16, weight: .semibold, relativeTo: .body)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tint(.white.opacity(0.22))
-                    .foregroundStyle(.white)
-                    .disabled(data.totalDue == 0)
-
-                    SparklineBars(values: data.last14Days)
-                        .frame(height: 28)
+        AmgiCard(background: heroGradient, shadow: palette.shadows.md) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .center) {
+                    Text("TODAY")
+                        .amgiFont(size: 13, weight: .semibold, tracking: 0.4, relativeTo: .footnote)
+                        .foregroundStyle(.white.opacity(0.8))
+                    Spacer(minLength: 12)
+                    StreakBadge(days: data.streak)
                         .redacted(reason: activityPending ? .placeholder : [])
                 }
-            }
-        )
-    }
 
-    private var subtitleText: String {
-        "cards across \(data.deckCount) deck\(data.deckCount == 1 ? "" : "s")"
+                HStack(spacing: 12) {
+                    HeroStudyButton(
+                        title: "Reviews",
+                        systemImage: "arrow.clockwise",
+                        count: data.reviewCount,
+                        action: onStartReviews
+                    )
+                    HeroStudyButton(
+                        title: "New",
+                        systemImage: "sparkles",
+                        count: data.newCount,
+                        action: onStartNew
+                    )
+                }
+
+                SparklineBars(values: data.last14Days)
+                    .frame(height: 28)
+                    .redacted(reason: activityPending ? .placeholder : [])
+            }
+        }
     }
 
     private var heroGradient: AmgiCardBackground {
@@ -78,6 +79,47 @@ public struct LibraryHeroCard: View {
             end: Color(red: 0.37, green: 0.36, blue: 0.91), // #5E5CE6 Apple indigo
             angle: .degrees(155)
         )
+    }
+}
+
+// MARK: - Study button
+
+/// One of the hero's two big buttons: what it studies, how many, and a
+/// start cue. The whole tile is the button.
+private struct HeroStudyButton: View {
+    let title: String
+    let systemImage: String
+    let count: Int
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 4) {
+                Label(title, systemImage: systemImage)
+                    .amgiFont(size: 15, weight: .semibold, relativeTo: .subheadline)
+                    .foregroundStyle(.white.opacity(0.9))
+                Text("\(count)")
+                    .amgiFont(size: 44, weight: .bold, tracking: -1, relativeTo: .largeTitle)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.5)
+                    .foregroundStyle(.white)
+                Label("Start", systemImage: "play.fill")
+                    .amgiFont(size: 13, weight: .semibold, relativeTo: .footnote)
+                    .foregroundStyle(.white.opacity(0.85))
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
+            .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        // An explicit style, not the default: inside a List row the default
+        // makes the whole row the hit area, so a tap would press both buttons.
+        .buttonStyle(.pressScale)
+        .disabled(count == 0)
+        .opacity(count == 0 ? 0.55 : 1)
+        .accessibilityLabel("\(title), \(count) \(count == 1 ? "card" : "cards")")
+        .accessibilityHint(count == 0 ? "Nothing to study" : "Starts studying")
     }
 }
 
@@ -134,27 +176,29 @@ private struct SparklineBars: View {
 #Preview("Populated") {
     LibraryHeroCard(
         data: HeroData(
-            totalDue: 680,
-            deckCount: 7,
+            reviewCount: 680,
+            newCount: 20,
             streak: 36,
             last14Days: [3, 5, 2, 7, 6, 9, 4, 8, 6, 5, 7, 3, 8, 5]
         ),
-        onStartReview: {}
+        onStartReviews: {},
+        onStartNew: {}
     )
     .padding(16)
     .background(Color.gray.opacity(0.12))
     .environment(\.palette, .vividLight)
 }
 
-#Preview("Zero due — CTA disabled") {
+#Preview("Nothing left — buttons disabled") {
     LibraryHeroCard(
         data: HeroData(
-            totalDue: 0,
-            deckCount: 4,
+            reviewCount: 0,
+            newCount: 0,
             streak: 12,
             last14Days: [3, 5, 0, 0, 6, 9, 4, 8, 6, 0, 7, 3, 8, 0]
         ),
-        onStartReview: {}
+        onStartReviews: {},
+        onStartNew: {}
     )
     .padding(16)
     .background(Color.gray.opacity(0.12))
@@ -164,12 +208,13 @@ private struct SparklineBars: View {
 #Preview("Streak zero — badge hidden") {
     LibraryHeroCard(
         data: HeroData(
-            totalDue: 42,
-            deckCount: 3,
+            reviewCount: 42,
+            newCount: 0,
             streak: 0,
             last14Days: Array(repeating: 0, count: 14)
         ),
-        onStartReview: {}
+        onStartReviews: {},
+        onStartNew: {}
     )
     .padding(16)
     .background(Color.gray.opacity(0.12))

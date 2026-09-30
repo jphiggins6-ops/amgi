@@ -590,4 +590,69 @@ import AnkiServices
             #expect(s.sessionStats.reviewed == 1)
         }
     }
+
+    // MARK: - New cards learned in a filtered deck
+
+    /// The engine credits an answer to the filtered deck the card sits in,
+    /// so the session tallies new cards by home deck and charges them when
+    /// it closes. An undone answer comes back off the tally.
+    @Test func newCardsLearnedInAFilteredDeckAreChargedToTheirHomeDecksOnClose() async throws {
+        let fromKorean = QueuedReviewCard.preview(
+            cardId: CardID(1), noteId: NoteID(101), ord: 0, queue: 0, originalDeckId: DeckID(5)
+        )
+        let fromNeuro = QueuedReviewCard.preview(
+            cardId: CardID(2), noteId: NoteID(102), ord: 0, queue: 0, originalDeckId: DeckID(6)
+        )
+
+        final class Progress: @unchecked Sendable {
+            private let lock = NSLock()
+            private var answered = 0
+            private var charged: [String] = []
+            var answeredCount: Int { lock.lock(); defer { lock.unlock() }; return answered }
+            func step(_ delta: Int) { lock.lock(); answered += delta; lock.unlock() }
+            func charge(_ entry: String) { lock.lock(); charged.append(entry); lock.unlock() }
+            var chargedEntries: [String] { lock.lock(); defer { lock.unlock() }; return charged }
+        }
+        let progress = Progress()
+
+        try await withDependencies {
+            $0.decksService.setCurrentDeck = { _ in }
+            $0.schedulerService.getQueuedCards = { _ in
+                let remaining = Array([fromKorean, fromNeuro].dropFirst(progress.answeredCount))
+                return QueuedCardsResult(cards: remaining, newCount: remaining.count, learningCount: 0, reviewCount: 0)
+            }
+            $0.schedulerService.answerReviewCard = { _, _, _, _ in progress.step(1) }
+            $0.schedulerService.recordNewCardsStudied = { deck, count in
+                progress.charge("\(deck.rawValue):\(count)")
+            }
+            $0.collectionService.undoLast = { progress.step(-1) }
+            $0.notesService.getNote = { id in
+                NoteRecord(id: id, guid: "g", mid: NotetypeID(200), mod: 0, flds: "", sfld: "", csum: 0)
+            }
+            $0.cardRenderingService.renderCard = { _ in
+                RenderedCard(frontHTML: "f", backHTML: "b", cardCSS: "")
+            }
+        } operation: {
+            let s = ReviewSession(deckId: DeckID(1))
+            s.countsNewCardsAgainstHomeDecks = true
+            s.start()
+            try await pollUntil { s.currentCardId == fromKorean.card.id && !s.isAdvancing }
+
+            s.answer(rating: .good)
+            try await pollUntil { s.currentCardId == fromNeuro.card.id && !s.isAdvancing }
+            s.answer(rating: .good)
+            try await pollUntil { s.isFinished && !s.isAdvancing }
+
+            // Take the second answer back: only the first card stays charged.
+            s.undo()
+            try await pollUntil { s.currentCardId == fromNeuro.card.id && !s.isAdvancing }
+
+            await s.recordNewCardsStudied()
+            #expect(progress.chargedEntries == ["5:1"])
+
+            // Recording again charges nothing twice.
+            await s.recordNewCardsStudied()
+            #expect(progress.chargedEntries == ["5:1"])
+        }
+    }
 }

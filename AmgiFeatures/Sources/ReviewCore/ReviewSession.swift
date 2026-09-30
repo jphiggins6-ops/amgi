@@ -68,6 +68,16 @@ public final class ReviewSession {
     var cardQueue: [QueuedReviewCard] = []
     /// Read once per session; see `ReviewQueueOrder`.
     @ObservationIgnored var defersRepeats: Bool = ReviewPreferences.defersRepeats
+    /// When set, new cards learned here out of a filtered deck are tallied
+    /// by home deck, and `recordNewCardsStudied()` charges them to those
+    /// decks' daily new-card limits. The engine credits an answer to the
+    /// deck the card sits in, so without this a filtered deck of new cards
+    /// never uses up any limit and today's new cards never run out.
+    @ObservationIgnored public var countsNewCardsAgainstHomeDecks = false
+    @ObservationIgnored private var newCardsStudied: [DeckID: Int32] = [:]
+    /// The home deck the last answer was tallied under, so an undo can take
+    /// it back off.
+    @ObservationIgnored private var lastTalliedHomeDeck: DeckID?
     var notetypeCache: [NotetypeID: Notetype] = [:]
     var currentQueuedCard: QueuedReviewCard?
     private var lastRating: Rating? = nil
@@ -232,6 +242,13 @@ public final class ReviewSession {
         let timeSpent = UInt32(min(max(elapsedMs, 0), Int64(UInt32.max)))
         let cardId = queued.card.id
         let states = queued.states
+        // Queue 0 is Anki's new queue; a non-zero original deck means the
+        // card is in a filtered deck.
+        let homeDeckToTally: DeckID? = countsNewCardsAgainstHomeDecks
+            && queued.card.queue == 0
+            && queued.card.odid.rawValue != 0
+            ? queued.card.odid
+            : nil
         let scheduler = self.scheduler
         let notes = self.notes
         let notetypes = self.notetypes
@@ -259,6 +276,10 @@ public final class ReviewSession {
                     sessionStats.totalTimeMs += Int(timeSpent)
                     lastRating = rating
                     canUndo = true
+                    if let homeDeckToTally {
+                        newCardsStudied[homeDeckToTally, default: 0] += 1
+                    }
+                    lastTalliedHomeDeck = homeDeckToTally
 
                     cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats)
                     remainingCounts = DeckCounts(
@@ -312,8 +333,12 @@ public final class ReviewSession {
                     if last != .again {
                         sessionStats.correct = max(0, sessionStats.correct - 1)
                     }
+                    if let deck = lastTalliedHomeDeck {
+                        newCardsStudied[deck, default: 0] -= 1
+                    }
                 }
                 lastRating = nil
+                lastTalliedHomeDeck = nil
 
                 cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats)
                 remainingCounts = DeckCounts(
@@ -326,6 +351,26 @@ public final class ReviewSession {
                 Log.review.error("Undo failed: \(error)")
             }
         }
+    }
+
+    /// Charges the new cards tallied this session to their home decks'
+    /// daily limits, then clears the tally. Call once, as the session
+    /// closes: the engine call clears the undo history.
+    public func recordNewCardsStudied() async {
+        let tally = newCardsStudied.filter { $0.value > 0 }
+        newCardsStudied = [:]
+        lastTalliedHomeDeck = nil
+        guard !tally.isEmpty else { return }
+        let scheduler = self.scheduler
+        await Task.detached {
+            for (deck, count) in tally {
+                do {
+                    try scheduler.recordNewCardsStudied(deck, count)
+                } catch {
+                    Log.review.error("Recording \(count) new cards for deck \(deck.rawValue) failed: \(error)")
+                }
+            }
+        }.value
     }
 
     public func updateAudioPlaying(_ playing: Bool) {

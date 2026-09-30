@@ -12,6 +12,12 @@ import DependenciesMacros
 @DependencyClient
 public struct CardClient: Sendable {
     public var fetchDue: @Sendable (_ deckId: DeckID) async throws -> [CardRecord]
+    /// Up to `limit` cards of a deck's study queue, in the order the
+    /// reviewer would get them. Makes the deck current, as starting a
+    /// review does.
+    public var fetchQueue: @Sendable (_ deckId: DeckID, _ limit: Int) async throws -> [CardRecord]
+    /// Ids of the cards matching an Anki search, unordered.
+    public var search: @Sendable (_ query: String) async throws -> [CardID]
     public var fetchByNote: @Sendable (_ noteId: NoteID) async throws -> [CardRecord]
     public var suspend: @Sendable (_ cardId: CardID) async throws -> Void
     public var bury: @Sendable (_ cardId: CardID) async throws -> Void

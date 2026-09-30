@@ -18,6 +18,10 @@ public struct SchedulerService: Sendable {
     public var getQueuedCards: @Sendable (_ fetchLimit: Int32) throws -> QueuedCardsResult
     /// Answer with scheduling states previously returned by getQueuedCards.
     public var answerReviewCard: @Sendable (_ cardId: CardID, _ rating: Rating, _ timeSpent: UInt32, _ states: ReviewSchedulingStates) throws -> Void
+    /// Records `count` new cards as studied today in a deck and its parents,
+    /// using up its daily new-card limit. Not undoable, and clears the undo
+    /// history.
+    public var recordNewCardsStudied: @Sendable (_ deckId: DeckID, _ count: Int32) throws -> Void
 }
 
 extension SchedulerService: DependencyKey {
@@ -31,6 +35,9 @@ extension SchedulerService: DependencyKey {
                 try backend.invoke(.answerReviewCard(
                     cardId: cardId, rating: rating, timeSpentMs: timeSpent, states: states
                 ))
+            },
+            recordNewCardsStudied: { deckId, count in
+                try backend.invoke(.updateStats(deckId: deckId, newDelta: count, reviewDelta: 0))
             }
         )
     }()

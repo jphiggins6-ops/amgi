@@ -88,6 +88,29 @@ extension Request where Response == Void {
         )
     }
 
+    /// Records cards as studied today in a deck and its parents, exactly as
+    /// answering them there would. An answer in a filtered deck is credited
+    /// to the filtered deck, not the card's home deck, so this is how new
+    /// cards learned through one can still use up the home deck's daily
+    /// new-card limit.
+    ///
+    /// Not undoable, and like every non-undoable engine operation it
+    /// clears the undo history — call it once a review session is over.
+    public static func updateStats(deckId: DeckID, newDelta: Int32, reviewDelta: Int32) -> Self {
+        Self(
+            serviceId: ServiceID.scheduler,
+            methodId: SchedulerMethod.updateStats,
+            encode: {
+                var proto = Anki_Scheduler_UpdateStatsRequest()
+                proto.deckID = deckId.rawValue
+                proto.newDelta = newDelta
+                proto.reviewDelta = reviewDelta
+                return try proto.serializedData()
+            },
+            decode: { _ in () }
+        )
+    }
+
     /// Suspends the given cards — they leave every queue until manually
     /// unsuspended.
     public static func suspendCards(cardIds: [CardID]) -> Self {

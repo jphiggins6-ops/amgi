@@ -63,3 +63,24 @@ extension Request where Response == Void {
         )
     }
 }
+
+// MARK: - searchCards
+
+extension Request where Response == [CardID] {
+    /// Runs a card search and returns the matching card ids, unordered.
+    /// An empty query is rewritten to `deck:*`, as `searchNoteIds` does.
+    public static func searchCardIds(query: String) -> Self {
+        Self(
+            serviceId: ServiceID.search,
+            methodId: SearchMethod.searchCards,
+            encode: {
+                var proto = Anki_Search_SearchRequest()
+                proto.search = query.isEmpty ? "deck:*" : query
+                return try proto.serializedData()
+            },
+            decode: { bytes in
+                try Anki_Search_SearchResponse(serializedBytes: bytes).ids.map { CardID($0) }
+            }
+        )
+    }
+}

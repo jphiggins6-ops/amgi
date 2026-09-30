@@ -54,10 +54,20 @@ package struct ReviewView: View {
     @State private var session: ReviewSession
     @State private var destination: ReviewDestination?
 
-    package init(deckId: DeckID, onDismiss: @escaping () -> Void) {
+    /// - Parameter countsNewCardsAgainstHomeDecks: for a filtered deck built
+    ///   in place of the normal daily queue (the Library's New button),
+    ///   charge the new cards learned in it to their home decks' daily
+    ///   limits when the session closes. See `ReviewSession`.
+    package init(
+        deckId: DeckID,
+        countsNewCardsAgainstHomeDecks: Bool = false,
+        onDismiss: @escaping () -> Void
+    ) {
         self.deckId = deckId
         self.onDismiss = onDismiss
-        self._session = State(initialValue: ReviewSession(deckId: deckId))
+        let session = ReviewSession(deckId: deckId)
+        session.countsNewCardsAgainstHomeDecks = countsNewCardsAgainstHomeDecks
+        self._session = State(initialValue: session)
     }
 
     package var body: some View {
@@ -70,7 +80,14 @@ package struct ReviewView: View {
             tapLookup: tapLookup,
             showNextReviewTime: showNextReviewTime,
             destination: $destination,
-            onDismiss: onDismiss
+            onDismiss: {
+                // Recorded before handing back, so the screen underneath
+                // reloads its counts after the limits have been charged.
+                Task {
+                    await session.recordNewCardsStudied()
+                    onDismiss()
+                }
+            }
         )
         .task {
             ReviewAudioSession.apply(playInSilent: playAudioInSilentMode)

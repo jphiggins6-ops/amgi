@@ -68,6 +68,7 @@ enum DecksMethod {
 enum SchedulerMethod {
     static let getQueuedCards: UInt32 = 3
     static let answerCard: UInt32 = 4
+    static let updateStats: UInt32 = 8
     static let extendLimits: UInt32 = 9
     static let buryOrSuspendCards: UInt32 = 14
     static let emptyFilteredDeck: UInt32 = 15

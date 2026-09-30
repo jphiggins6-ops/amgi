@@ -13,6 +13,24 @@ import AnkiProto
 private import SwiftProtobuf
 
 @Suite struct CardsRequestsTests {
+    @Test func searchCardIds_dispatches_to_search_cards_and_decodes_ids() throws {
+        let envelope: Request<[CardID]> = .searchCardIds(query: "is:due flag:0")
+        #expect(envelope.serviceId == ServiceID.search)
+        #expect(envelope.methodId == SearchMethod.searchCards)
+        let proto = try Anki_Search_SearchRequest(serializedBytes: envelope.body)
+        #expect(proto.search == "is:due flag:0")
+
+        var response = Anki_Search_SearchResponse()
+        response.ids = [4, 9]
+        #expect(try envelope.decode(response.serializedData()) == [CardID(4), CardID(9)])
+    }
+
+    @Test func searchCardIds_rewrites_an_empty_query_to_every_deck() throws {
+        let envelope: Request<[CardID]> = .searchCardIds(query: "")
+        let proto = try Anki_Search_SearchRequest(serializedBytes: envelope.body)
+        #expect(proto.search == "deck:*")
+    }
+
     @Test func getCard_dispatches_and_encodes_id() throws {
         let envelope: Request<CardRecord> = .getCard(id: CardID(42))
         #expect(envelope.serviceId == ServiceID.cards)

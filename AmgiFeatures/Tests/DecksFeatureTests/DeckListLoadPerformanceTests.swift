@@ -80,6 +80,7 @@ final class DeckListLoadPerformanceTests: XCTestCase {
         return withDependencies {
             $0.deckClient = deckClient
             $0.statsClient = StatsClient { _, _ in snapshot }
+            $0.cardClient.search = { _ in [] }
         } operation: {
             // Built *inside* the scope, not while assembling DependencyValues:
             // `@Dependency` captures the ambient context when the property
@@ -135,7 +136,8 @@ final class DeckListLoadPerformanceTests: XCTestCase {
             return XCTFail("expected .loaded, got \(model.state)")
         }
         XCTAssertEqual(rows.count, 7, "top-level rows")
-        XCTAssertEqual(hero.deckCount, 7)
+        XCTAssertEqual(hero.newCount, 140, "20 new cards in each of the 7 top-level decks")
+        XCTAssertEqual(hero.reviewCount, 0, "the stubbed search finds nothing due")
         XCTAssertEqual(heatmap?.counts.count, 365, "a full year of activity")
     }
 }

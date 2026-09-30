@@ -97,6 +97,34 @@ import AnkiKit
         }
     }
 
+    @Test func updateStats_usesUpADecksDailyNewCardLimit() throws {
+        try withScratchCollection("sched-update-stats") { backend, _ in
+            _ = try addCard(backend)
+
+            let context = try backend.invoke(.deckConfigsForUpdate(deckId: DeckID(1)))
+            var preset = try #require(context.allConfig.first?.config)
+            preset.config.newPerDay = 1
+            try backend.invoke(
+                .updateDeckConfigs(
+                    UpdateDeckConfigsRequest(targetDeckID: DeckID(1), configs: [preset])
+                )
+            )
+            #expect(try backend.invoke(.deckCounts(for: DeckID(1)))?.newCount == 1)
+
+            // One new card recorded as studied uses up the whole limit of one.
+            try backend.invoke(.updateStats(deckId: DeckID(1), newDelta: 1, reviewDelta: 0))
+            #expect(try backend.invoke(.deckCounts(for: DeckID(1)))?.newCount == 0)
+        }
+    }
+
+    @Test func searchCardIds_findsCardsByState() throws {
+        try withScratchCollection("search-cards") { backend, _ in
+            let card = try addCard(backend)
+            #expect(try backend.invoke(.searchCardIds(query: "is:new")) == [card])
+            #expect(try backend.invoke(.searchCardIds(query: "is:due")).isEmpty)
+        }
+    }
+
     @Test func setFlag_andRemoveCards() throws {
         try withScratchCollection("cards-flag") { backend, _ in
             let card = try addCard(backend)

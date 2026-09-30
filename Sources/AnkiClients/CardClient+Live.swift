@@ -49,6 +49,15 @@ extension CardClient: DependencyKey {
                     }
                 }
             },
+            fetchQueue: { deckId, limit in
+                try await backendOffload {
+                    try decks.setCurrentDeck(deckId)
+                    return try scheduler.getQueuedCards(Int32(clamping: limit)).cards.map(\.card)
+                }
+            },
+            search: { query in
+                try await backend.invoke(.searchCardIds(query: query))
+            },
             fetchByNote: { noteId in
                 let ids = try await backend.invoke(.cardIDsOfNote(id: noteId))
                 var cards: [CardRecord] = []
