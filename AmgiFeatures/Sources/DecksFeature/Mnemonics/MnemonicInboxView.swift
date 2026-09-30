@@ -15,6 +15,7 @@ import UIKit
 package struct MnemonicInboxView: View {
     @State private var model = MnemonicInboxModel()
     @State private var discardTarget: MnemonicInboxRow.ID?
+    @State private var showSettings = false
 
     package init() {}
 
@@ -28,6 +29,14 @@ package struct MnemonicInboxView: View {
             .navigationTitle("Mnemonics")
             .navigationBarTitleDisplayMode(.inline)
             .task { await model.load() }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Picture Settings", systemImage: "gearshape") { showSettings = true }
+                }
+            }
+            .sheet(isPresented: $showSettings, onDismiss: { model.refreshKeyStatus() }) {
+                MnemonicSettingsSheet()
+            }
             .sensoryFeedback(.success, trigger: model.approvedCount)
             .confirmationDialog(
                 "Discard this idea?",
@@ -64,6 +73,15 @@ package struct MnemonicInboxView: View {
             }
         case .loaded:
             List {
+                if model.usesPlaceholder {
+                    Section {
+                        Label(
+                            "Drafts are free placeholder squares until you add an OpenAI key.",
+                            systemImage: "info.circle"
+                        )
+                        Button("Add OpenAI Key") { showSettings = true }
+                    }
+                }
                 ForEach(model.rows) { row in
                     MnemonicInboxRowView(
                         row: row,
@@ -156,7 +174,14 @@ private struct MnemonicInboxRowView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(palette.surfaceElevated)
                 .frame(height: 200)
-                .overlay { ProgressView() }
+                .overlay {
+                    VStack(spacing: 8) {
+                        ProgressView()
+                        Text("Drawing — can take up to a minute")
+                            .amgiFont(size: 12, weight: .regular)
+                            .foregroundStyle(palette.textSecondary)
+                    }
+                }
         } else if let draft = row.draft, let image = decoded(draft) {
             image
                 .resizable()

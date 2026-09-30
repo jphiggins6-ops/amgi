@@ -10,7 +10,7 @@ What Amgi does today. For how it is put together, see [ARCHITECTURE.md](ARCHITEC
 - **Dual card rendering** — the Rust template engine renders cards exactly like desktop clients. Simple cards are auto-detected and drawn by a native SwiftUI renderer; complex cards fall back to a sandboxed WebKit host. A per-card chip shows which path is active, and the render mode can be pinned per template.
 - **MathJax and audio** — formula rendering and card audio playback in both renderers.
 - **Today view** — an aggregate "due now" screen across every deck, with an up-next queue ordered by workload.
-- **Visual mnemonics** (experimental) — tap ✨ while reviewing to save an idea for a picture onto the card, then carry on. Later, from Library → Mnemonics, edit each description, generate a draft, and approve it into the card's Extra field (or Back Extra / Back) or discard it. Nothing reaches the card until you approve. Ideas are stored inside the note, so they sync like any other edit. Draft pictures are placeholders for now; a real image model plugs into `MnemonicImageGenerator`.
+- **Visual mnemonics** (experimental) — tap ✨ while reviewing to save an idea for a picture onto the card, then carry on. Later, from Library → Mnemonics, edit each description, generate a draft, and approve it into the card's Extra field (or Back Extra / Back) or discard it. Nothing reaches the card until you approve. Ideas are stored inside the note, so they sync like any other edit. Pictures come from OpenAI's image API once you save an API key (Mnemonics → ⚙︎); until then drafts are free placeholder squares. The key is kept in the Keychain, drafts are kept on the device until approved, and pictures are stored as 768 px JPEGs.
 
 ## Decks
 

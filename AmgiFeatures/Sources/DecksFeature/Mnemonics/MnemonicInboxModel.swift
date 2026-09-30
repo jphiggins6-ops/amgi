@@ -30,8 +30,9 @@ struct MnemonicInboxRow: Identifiable {
 }
 
 /// The review-later half: every waiting idea, a draft picture per idea on
-/// request, and approve / discard. Drafts live only here, in memory — nothing
-/// reaches a card until Approve.
+/// request, and approve / discard. Drafts are kept on disk until approved or
+/// discarded — a real picture costs money, so leaving the screen mustn't
+/// lose one — but nothing reaches a card until Approve.
 @Observable
 @MainActor
 final class MnemonicInboxModel {
@@ -45,19 +46,36 @@ final class MnemonicInboxModel {
     private(set) var rows: [MnemonicInboxRow] = []
     /// Bumped per approval; drives the success haptic.
     private(set) var approvedCount = 0
+    /// No OpenAI key saved, so Generate draws free placeholder squares.
+    private(set) var usesPlaceholder = true
 
     @ObservationIgnored @Dependency(\.mnemonicClient) private var client
     @ObservationIgnored @Dependency(\.mnemonicImageGenerator) private var generator
+    private let drafts: MnemonicDraftCache
+
+    init(drafts: MnemonicDraftCache = MnemonicDraftCache()) {
+        self.drafts = drafts
+    }
+
+    func refreshKeyStatus() {
+        usesPlaceholder = MnemonicAPIKey.load() == nil
+    }
 
     /// A refresh keeps any typing and drafts for ideas that are still
     /// waiting — pulling to refresh shouldn't throw away work.
     func load() async {
+        refreshKeyStatus()
         do {
             let items = try await client.pending()
             let previous = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             rows = items.map { item -> MnemonicInboxRow in
                 guard var kept = previous[item.id] else {
-                    return MnemonicInboxRow(item: item, prompt: item.idea)
+                    var row = MnemonicInboxRow(item: item, prompt: item.idea)
+                    if let saved = drafts.load(for: item.id) {
+                        row.draft = saved.image
+                        row.draftPrompt = saved.prompt
+                    }
+                    return row
                 }
                 kept.item = item
                 return kept
@@ -92,6 +110,7 @@ final class MnemonicInboxModel {
                 item.idea = prompt
             }
             let image = try await generator.generate(MnemonicImageRequest(idea: prompt))
+            drafts.save(MnemonicDraft(image: image, prompt: prompt), for: id)
             update(id) {
                 $0.item = item
                 $0.draft = image
@@ -119,6 +138,7 @@ final class MnemonicInboxModel {
 
         do {
             try await client.approve(item, draftPrompt, draft)
+            drafts.remove(for: id)
             rows.removeAll { $0.id == id }
             approvedCount += 1
         } catch {
@@ -137,6 +157,7 @@ final class MnemonicInboxModel {
 
         do {
             try await client.discard(item)
+            drafts.remove(for: id)
             rows.removeAll { $0.id == id }
         } catch {
             update(id) {

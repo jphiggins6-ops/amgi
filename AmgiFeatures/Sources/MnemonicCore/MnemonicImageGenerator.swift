@@ -50,8 +50,9 @@ public enum MnemonicPromptStyle {
 /// THE HOOK: the one place a picture gets made.
 ///
 /// Everything else — capture, the review list, approval — only ever calls
-/// `generate`. Swapping the placeholder for a real image model means
-/// providing a different `liveValue` here; no screen changes.
+/// `generate`. `liveValue` is `.automatic`: OpenAI when a key is saved,
+/// the placeholder otherwise. Another image service would be one more
+/// factory here; no screen changes.
 public struct MnemonicImageGenerator: Sendable {
     public var generate: @Sendable (_ request: MnemonicImageRequest) async throws -> MnemonicImage
 
@@ -73,8 +74,42 @@ extension MnemonicImageGenerator {
     }
 }
 
+extension MnemonicImageGenerator {
+    /// OpenAI's image API. The picture comes back as a 1024 px image and is
+    /// shrunk to a 768 px JPEG before anything else sees it.
+    public static func openAI(
+        apiKey: String,
+        model: String,
+        quality: MnemonicSettings.Quality
+    ) -> MnemonicImageGenerator {
+        MnemonicImageGenerator { request in
+            let raw = try await OpenAIImageClient.generate(
+                prompt: request.fullPrompt,
+                apiKey: apiKey,
+                model: model,
+                quality: quality
+            )
+            return await MnemonicImageProcessing.finalize(raw)
+        }
+    }
+
+    /// Real pictures when an OpenAI key is saved, free placeholders when
+    /// not. Decided on every call, so saving or removing a key takes effect
+    /// immediately, with no restart.
+    public static let automatic = MnemonicImageGenerator { request in
+        guard let apiKey = MnemonicAPIKey.load() else {
+            return try await MnemonicImageGenerator.placeholder.generate(request)
+        }
+        return try await MnemonicImageGenerator.openAI(
+            apiKey: apiKey,
+            model: MnemonicSettings.model,
+            quality: MnemonicSettings.quality
+        ).generate(request)
+    }
+}
+
 extension MnemonicImageGenerator: DependencyKey {
-    public static let liveValue = MnemonicImageGenerator.placeholder
+    public static let liveValue = MnemonicImageGenerator.automatic
     public static let testValue = MnemonicImageGenerator { _ in
         throw MnemonicError.unimplemented("MnemonicImageGenerator.generate")
     }
