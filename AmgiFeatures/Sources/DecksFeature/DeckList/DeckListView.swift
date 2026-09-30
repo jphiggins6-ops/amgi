@@ -25,6 +25,7 @@ package struct DeckListView: View {
     @State private var showCreateSheet = false
     @State private var showBrowse = false
     @State private var showFilteredDecks = false
+    @State private var showMnemonics = false
     @State private var renameTarget: DeckRowViewData?
     @State private var pendingDeck: DeckInfo?
     @State private var accounts = AccountStore.shared
@@ -79,6 +80,9 @@ package struct DeckListView: View {
         .navigationDestination(isPresented: $showFilteredDecks) {
             FilteredDeckPresetsView()
         }
+        .navigationDestination(isPresented: $showMnemonics) {
+            MnemonicInboxView()
+        }
         .toolbar { toolbarContent }
         .sheet(isPresented: $showCreateSheet) {
             CreateDeckSheet {
@@ -123,6 +127,11 @@ package struct DeckListView: View {
                     showFilteredDecks = true
                 } label: {
                     Label("Filtered Decks…", systemImage: "line.3.horizontal.decrease.circle")
+                }
+                Button {
+                    showMnemonics = true
+                } label: {
+                    Label("Mnemonics…", systemImage: "sparkles")
                 }
                 Button(action: onImport) {
                     Label("Import Deck…", systemImage: "square.and.arrow.down")

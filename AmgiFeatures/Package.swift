@@ -221,6 +221,7 @@ let package = Package(
                 "AppShared",
                 "BrowseFeature",
                 "ReviewFeature",
+                "MnemonicCore",
                 .product(name: "AnkiKit", package: "amgi"),
                 .product(name: "AnkiClients", package: "amgi"),
                 .product(name: "Theme", package: "AmgiUI"),
@@ -228,6 +229,28 @@ let package = Package(
                 .product(name: "Dependencies", package: "swift-dependencies"),
                 .product(name: "SwiftUINavigation", package: "swift-navigation"),
                 .product(name: "CasePaths", package: "swift-case-paths"),
+            ],
+            swiftSettings: sharedSwiftSettings
+        ),
+        // Visual mnemonics: capture an idea mid-review, make and approve the
+        // picture later. A sink, so ReviewFeature (the ✨ sheet) and
+        // DecksFeature (the review list) share it without an edge between
+        // them. Pending ideas live inside the notes themselves as HTML
+        // comments — see MnemonicMarker — so there is no queue to persist.
+        .target(
+            name: "MnemonicCore",
+            dependencies: [
+                .product(name: "AnkiKit", package: "amgi"),
+                .product(name: "AnkiClients", package: "amgi"),
+                .product(name: "Dependencies", package: "swift-dependencies"),
+            ],
+            swiftSettings: sharedSwiftSettings
+        ),
+        .testTarget(
+            name: "MnemonicCoreTests",
+            dependencies: [
+                "MnemonicCore",
+                .product(name: "AnkiKit", package: "amgi"),
             ],
             swiftSettings: sharedSwiftSettings
         ),
@@ -256,6 +279,7 @@ let package = Package(
                 "AppCore",
                 "AppShared",
                 "ReviewCore",
+                "MnemonicCore",
                 "BrowseFeature",
                 "TemplatesFeature",
                 // Reader (not ReaderDictionary) is pure Swift — no Cxx mode —

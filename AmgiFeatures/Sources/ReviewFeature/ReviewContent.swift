@@ -44,6 +44,8 @@ struct ReviewContent: View {
     @State private var cardActions = CardContextMenuModel()
     @State private var confirmDeleteNote = false
     @State private var lookupHighlight = LookupHighlight()
+    /// Bumped when a ✨ idea is saved; drives the confirmation haptic.
+    @State private var mnemonicSavedCount = 0
 
     private var keyboardActive: Bool {
         destination == nil && !confirmDeleteNote
@@ -79,6 +81,7 @@ struct ReviewContent: View {
             }
             .background(palette.background)
             .reviewHaptics(session: session)
+            .sensoryFeedback(.success, trigger: mnemonicSavedCount)
             .navigationBarTitleDisplayMode(.inline)
             #if canImport(UIKit)
             .toolbar {
@@ -97,6 +100,9 @@ struct ReviewContent: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         ReviewPositionCounter(session: session)
                     }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    MnemonicCaptureButton(session: session, destination: $destination)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     ReviewUndoButton(session: session, shortcutEnabled: keyboardActive)
@@ -125,6 +131,15 @@ struct ReviewContent: View {
                     NoteEditorView(note: note) {
                         Task { await session.refreshAfterEdit() }
                     }
+                }
+            }
+            .sheet(item: $destination.captureMnemonic) { note in
+                MnemonicCaptureSheet(note: note) {
+                    mnemonicSavedCount += 1
+                    // The idea is now in the note, so the session's cached
+                    // copy is stale. Refresh it, or a later Edit Note would
+                    // save the old copy back over the idea.
+                    Task { await session.refreshAfterEdit() }
                 }
             }
             .sheet(item: $destination.editTemplate) { target in
@@ -167,6 +182,7 @@ struct ReviewContent: View {
             if showRemainingDays {
                 ReviewPositionCounter(session: session)
             }
+            MnemonicCaptureButton(session: session, destination: $destination)
             ReviewUndoButton(session: session, shortcutEnabled: keyboardActive)
             CardActionsMenu(
                 session: session,
@@ -282,6 +298,21 @@ private struct ReviewUndoButton: View {
         .disabled(!session.canUndo)
         .keyboardShortcut(shortcutEnabled ? KeyboardShortcut("z", modifiers: .command) : nil)
         .accessibilityLabel("Undo")
+    }
+}
+
+private struct MnemonicCaptureButton: View {
+    let session: ReviewSession
+    @Binding var destination: ReviewDestination?
+
+    var body: some View {
+        Button {
+            destination = session.currentNote.map(ReviewDestination.captureMnemonic)
+        } label: {
+            Image(systemName: "sparkles")
+        }
+        .disabled(session.currentNote == nil)
+        .accessibilityLabel("Visual mnemonic")
     }
 }
 

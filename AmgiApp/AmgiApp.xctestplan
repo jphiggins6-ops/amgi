@@ -95,6 +95,13 @@
     },
     {
       "target" : {
+        "containerPath" : "container:../AmgiFeatures",
+        "identifier" : "MnemonicCoreTests",
+        "name" : "MnemonicCoreTests"
+      }
+    },
+    {
+      "target" : {
         "containerPath" : "container:../AmgiUI",
         "identifier" : "ThemeTests",
         "name" : "ThemeTests"

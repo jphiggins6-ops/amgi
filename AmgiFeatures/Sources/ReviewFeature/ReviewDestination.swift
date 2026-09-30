@@ -11,7 +11,8 @@ import AnkiKit
 import ReviewCore
 
 /// Single source of truth for every modal axis on the review screen: the note
-/// editor, the template editor, and the dictionary lookup popup.
+/// editor, the template editor, the dictionary lookup popup, and the ✨
+/// visual-mnemonic capture sheet.
 ///
 /// Replaces three independent optionals (`editingNote`, `editingTemplate`,
 /// `lookupQuery`) threaded down as three bindings, which between them could
@@ -27,6 +28,7 @@ enum ReviewDestination {
     case editNote(NoteRecord)
     case editTemplate(ReviewSession.TemplateTarget)
     case lookup(String)
+    case captureMnemonic(NoteRecord)
 }
 
 extension Optional where Wrapped == ReviewDestination {
