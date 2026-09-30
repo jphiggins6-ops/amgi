@@ -103,6 +103,12 @@ final class DeckListModel {
     /// The Library's "Start today's review": every card that is due, has no
     /// flag, and isn't in deck "p", gathered into one filtered deck.
     ///
+    /// Gathered in random order. The engine numbers the cards in gather
+    /// order as they enter a filtered deck and serves them by that number,
+    /// so this shuffles the whole review, decks mixed together, afresh on
+    /// every rebuild. The limit is above any real due count, so the order
+    /// never decides which cards are left out.
+    ///
     /// `reschedule: true` means answers count exactly as they would in the
     /// card's home deck — the engine schedules with the home deck's preset
     /// (FSRS parameters, steps, retention). Rebuilt in place on every tap,
@@ -117,7 +123,7 @@ final class DeckListModel {
             id: existing?.id ?? DeckID(0),
             name: Self.studyNowDeckName,
             searchTerms: [
-                FilteredDeckSearchTerm(search: Self.studyNowSearch, limit: 9999, order: .due)
+                FilteredDeckSearchTerm(search: Self.studyNowSearch, limit: 9999, order: .random)
             ],
             reschedule: true
         )
