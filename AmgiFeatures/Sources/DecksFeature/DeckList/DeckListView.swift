@@ -15,6 +15,7 @@ import AnkiClients
 import Dependencies
 import Sharing
 import BrowseFeature
+import ReviewFeature
 
 package struct DeckListView: View {
     private let onSwitchProfile: (AmgiAccount) async -> Void
@@ -26,6 +27,9 @@ package struct DeckListView: View {
     @State private var showBrowse = false
     @State private var showFilteredDecks = false
     @State private var showMnemonics = false
+    @State private var studyNowDeckId: DeckID?
+    @State private var isBuildingStudyNow = false
+    @State private var studyNowError: String?
     @State private var renameTarget: DeckRowViewData?
     @State private var pendingDeck: DeckInfo?
     @State private var accounts = AccountStore.shared
@@ -61,7 +65,7 @@ package struct DeckListView: View {
             state: model.state,
             selectedDeckID: pendingDeck?.id.rawValue,
             onRefresh: { await model.load() },
-            onStartReview: { pendingDeck = model.firstReviewableDeck() },
+            onStartReview: { Task { await startStudyNow() } },
             onTapDeck: { row in pendingDeck = row.asDeckInfo },
             onDeleteDeck: { rawID in await model.delete(DeckID(rawID)) },
             onRenameDeck: { row in renameTarget = row },
@@ -84,6 +88,21 @@ package struct DeckListView: View {
             MnemonicInboxView()
         }
         .toolbar { toolbarContent }
+        .fullScreenCover(item: $studyNowDeckId) { deckId in
+            ReviewView(deckId: deckId) {
+                studyNowDeckId = nil
+                store.invalidateAll()
+            }
+        }
+        .alert(
+            "Nothing to study",
+            isPresented: Binding(get: { studyNowError != nil }, set: { if !$0 { studyNowError = nil } }),
+            presenting: studyNowError
+        ) { _ in
+            Button("OK") {}
+        } message: { message in
+            Text(message)
+        }
         .sheet(isPresented: $showCreateSheet) {
             CreateDeckSheet {
                 showCreateSheet = false
@@ -139,6 +158,19 @@ package struct DeckListView: View {
             } label: {
                 Label("More", systemImage: "ellipsis")
             }
+        }
+    }
+
+    private func startStudyNow() async {
+        guard !isBuildingStudyNow else { return }
+        isBuildingStudyNow = true
+        defer { isBuildingStudyNow = false }
+        do {
+            studyNowDeckId = try await model.buildStudyNowDeck()
+        } catch {
+            // The engine refuses to build a filtered deck that gathers
+            // nothing — i.e. every due card is flagged or in "p".
+            studyNowError = error.localizedDescription
         }
     }
 

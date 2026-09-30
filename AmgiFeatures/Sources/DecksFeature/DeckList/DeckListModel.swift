@@ -100,11 +100,30 @@ final class DeckListModel {
         }
     }
 
-    /// First loaded deck that has cards waiting, projected to a `DeckInfo`
-    /// for navigation. Nil while loading/empty or when nothing is due.
-    func firstReviewableDeck() -> DeckInfo? {
-        guard case .loaded(let rows, _, _) = state else { return nil }
-        return rows.first(where: { $0.totalCount > 0 })?.asDeckInfo
+    /// The Library's "Start today's review": every card that is due, has no
+    /// flag, and isn't in deck "p", gathered into one filtered deck.
+    ///
+    /// `reschedule: true` means answers count exactly as they would in the
+    /// card's home deck — the engine schedules with the home deck's preset
+    /// (FSRS parameters, steps, retention). Rebuilt in place on every tap,
+    /// so there is only ever one of it.
+    static let studyNowDeckName = "Study Now"
+    static let studyNowSearch = "is:due flag:0 -deck:p"
+
+    func buildStudyNowDeck() async throws -> DeckID {
+        let tree = (try? await deckClient.fetchTree()) ?? []
+        let existing = FilteredDeckPresetsModel.filteredDecksByName(tree)[Self.studyNowDeckName]
+        let spec = FilteredDeckSpec(
+            id: existing?.id ?? DeckID(0),
+            name: Self.studyNowDeckName,
+            searchTerms: [
+                FilteredDeckSearchTerm(search: Self.studyNowSearch, limit: 9999, order: .due)
+            ],
+            reschedule: true
+        )
+        let creation = try await deckClient.createFilteredDeck(spec)
+        store.apply(creation.changes)
+        return creation.id
     }
 
     static func buildHeatmap(
