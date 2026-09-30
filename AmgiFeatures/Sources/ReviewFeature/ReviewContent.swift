@@ -46,6 +46,9 @@ struct ReviewContent: View {
     @State private var lookupHighlight = LookupHighlight()
     /// Bumped when a ✨ idea is saved; drives the confirmation haptic.
     @State private var mnemonicSavedCount = 0
+    /// Bumped when a tap or swipe flags a card, which otherwise shows only
+    /// as the menu icon's colour.
+    @State private var gestureFlagCount = 0
 
     private var keyboardActive: Bool {
         destination == nil && !confirmDeleteNote
@@ -75,13 +78,15 @@ struct ReviewContent: View {
                         showNextReviewTime: showNextReviewTime,
                         lookupHighlight: lookupHighlight,
                         shortcutsEnabled: keyboardActive,
-                        lookupQuery: $destination.lookupText
+                        lookupQuery: $destination.lookupText,
+                        onGesture: { perform($0) }
                     )
                 }
             }
             .background(palette.background)
             .reviewHaptics(session: session)
             .sensoryFeedback(.success, trigger: mnemonicSavedCount)
+            .sensoryFeedback(.selection, trigger: gestureFlagCount)
             .navigationBarTitleDisplayMode(.inline)
             #if canImport(UIKit)
             .toolbar {
@@ -161,6 +166,45 @@ struct ReviewContent: View {
                     )
                 }
             }
+        }
+    }
+
+    /// Runs the action chosen for this tap area or swipe in Settings.
+    /// Ignored while a sheet or dialog is up, while an answer is being typed
+    /// (a tap meant to dismiss the keyboard must not reveal it), and for a
+    /// moment after the card changes or turns over
+    /// (`ReviewSession.acceptsGestures`).
+    private func perform(_ gesture: ReviewGesture) {
+        guard keyboardActive, session.acceptsGestures, !session.requiresTypedAnswerInput else { return }
+        let action = ReviewPreferences.gestureAction(for: gesture)
+        if let rating = action.rating {
+            // Never rate an unseen answer: on the question side, show it.
+            if session.showAnswer {
+                session.answer(rating: rating)
+            } else {
+                session.revealAnswer()
+            }
+            return
+        }
+        switch action {
+        case .showAnswer:
+            session.revealAnswer()
+        case .undo:
+            session.undo()
+        case .replayAudio:
+            session.bumpReplayRequest()
+        case .editNote:
+            destination = session.currentNote.map(ReviewDestination.editNote)
+        case .visualMnemonic:
+            destination = session.currentNote.map(ReviewDestination.captureMnemonic)
+        case .flagRed, .flagOrange, .flagGreen, .flagBlue:
+            guard let cardId = session.currentCardId, let flag = action.flag else { return }
+            Task {
+                await cardActions.toggleFlag(cardId, flag)
+                gestureFlagCount += 1
+            }
+        case .nothing, .again, .hard, .good, .easy:
+            break
         }
     }
 

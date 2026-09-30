@@ -37,6 +37,7 @@ struct ReviewSettingsView: View {
     var body: some View {
         SettingsPage {
             cardOrderSection
+            gesturesSection
             cardDisplaySection
             answerButtonsSection
             audioSection
@@ -57,6 +58,21 @@ struct ReviewSettingsView: View {
                 )
             }
             SettingsFootnote("Cards you miss, and cards you're still learning, come back only after every other due card has had its turn. Turn off for Anki's usual order, where a card you miss can come back within minutes.")
+        }
+    }
+
+    private var gesturesSection: some View {
+        Group {
+            SettingsSectionHeader(title: "Gestures")
+            SettingsGroup {
+                SettingsRowLink(
+                    title: "Taps & Swipes",
+                    systemImage: "hand.tap",
+                    tone: .accent
+                ) {
+                    TapsAndSwipesSettingsView()
+                }
+            }
         }
     }
 

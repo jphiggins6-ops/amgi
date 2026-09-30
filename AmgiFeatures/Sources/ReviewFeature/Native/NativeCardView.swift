@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppCore
 import UI
 import Theme
 import AmgiCardWeb
@@ -19,8 +20,12 @@ struct NativeCardView: View {
     let content: NativeCardContent
     let isAnswerSide: Bool
     let mediaFolder: URL?
+    var onGesture: ((ReviewGesture) -> Void)? = nil
 
     @Environment(\.palette) private var palette
+    @State private var size: CGSize = .zero
+    @State private var scrollOffset: CGFloat = 0
+    @State private var dragStartOffset: CGFloat?
 
     @ScaledMetric(relativeTo: .largeTitle) private var headwordFront: CGFloat = 48
     @ScaledMetric(relativeTo: .title) private var headwordBack: CGFloat = 34
@@ -43,6 +48,40 @@ struct NativeCardView: View {
             .padding(.horizontal)
             .padding(.top, 8)
         }
+        // Content that fits must not bounce, or every vertical swipe would
+        // scroll it and be discarded as a scroll.
+        .scrollBounceBehavior(.basedOnSize)
+        .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y }) { _, offset in
+            scrollOffset = offset
+        }
+        .onGeometryChange(for: CGSize.self, of: { $0.size }) { size = $0 }
+        .contentShape(Rectangle())
+        .onTapGesture(coordinateSpace: .local) { location in
+            guard let onGesture, size.width > 0, size.height > 0 else { return }
+            onGesture(.tap(x: location.x / size.width, y: location.y / size.height))
+        }
+        .simultaneousGesture(swipe)
+    }
+
+    /// A quick, mostly straight drag. A vertical one that scrolled the card
+    /// was a scroll, not a swipe.
+    private var swipe: some Gesture {
+        DragGesture(minimumDistance: 30)
+            .onChanged { _ in
+                if dragStartOffset == nil { dragStartOffset = scrollOffset }
+            }
+            .onEnded { value in
+                let start = dragStartOffset ?? scrollOffset
+                dragStartOffset = nil
+                guard let onGesture else { return }
+                let dx = value.translation.width
+                let dy = value.translation.height
+                if abs(dx) >= 60, abs(dx) >= 2 * abs(dy) {
+                    onGesture(dx < 0 ? .swipeLeft : .swipeRight)
+                } else if abs(dy) >= 60, abs(dy) >= 2 * abs(dx), abs(scrollOffset - start) <= 12 {
+                    onGesture(dy < 0 ? .swipeUp : .swipeDown)
+                }
+            }
     }
 
     private var firstTextIndex: Int? {

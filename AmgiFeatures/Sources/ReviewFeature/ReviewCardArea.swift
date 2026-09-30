@@ -37,6 +37,8 @@ struct ReviewCardArea: View {
     let lookupHighlight: LookupHighlight
     let shortcutsEnabled: Bool
     @Binding var lookupQuery: String?
+    /// A tap area or swipe on the card; the reviewer decides what it does.
+    var onGesture: ((ReviewGesture) -> Void)? = nil
 
     @Environment(\.palette) private var palette
     @Shared(.appStorage(ReaderPreferences.Keys.dictionaryScanLength))
@@ -177,7 +179,8 @@ struct ReviewCardArea: View {
             NativeCardView(
                 content: isBack ? back : front,
                 isAnswerSide: isBack,
-                mediaFolder: mediaFolder
+                mediaFolder: mediaFolder,
+                onGesture: onGesture
             )
         case .html:
             VStack(spacing: 0) {
@@ -202,7 +205,8 @@ struct ReviewCardArea: View {
                     onLookupRequested: tapLookup && !session.requiresTypedAnswerInput ? { text, _, _ in
                         if let text, !text.isEmpty { lookupQuery = text }
                     } : nil,
-                    onShowAnswerRequested: { session.revealAnswer() }
+                    onShowAnswerRequested: { session.revealAnswer() },
+                    onGesture: onGesture
                 )
             }
         }

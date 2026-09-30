@@ -92,6 +92,14 @@ public final class CardContextMenuModel {
         }
     }
 
+    /// Sets flag `value`, or clears it when the card already carries it.
+    /// Reads the card's flag first: `currentFlag` is only as fresh as the
+    /// last `load`, and a gesture can arrive without the menu ever opening.
+    public func toggleFlag(_ cardId: CardID, _ value: UInt32) async {
+        let current = ((try? await cardClient.getCardFlags(cardId)) ?? currentFlag) & 0b111
+        _ = await flag(cardId, current == value ? 0 : value)
+    }
+
     func undo(_ cardId: CardID) async -> Bool? {
         guard !isUndoing, canUndo else { return nil }
         isUndoing = true

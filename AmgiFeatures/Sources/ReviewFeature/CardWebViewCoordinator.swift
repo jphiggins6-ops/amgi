@@ -22,12 +22,12 @@ import AmgiCardWeb
 /// — nested `Coordinator` class, lines ~1757-2053) and promoted to a top-level type.
 ///
 /// The coordinator is responsible for:
-///  - Receiving the 7 JS bridge messages (amgi* names)
+///  - Receiving the JS bridge messages (amgi* names)
 ///  - Calling back to the SwiftUI layer via stored closures
 ///  - AVSpeechSynthesizer integration for TTS
 ///  - Frame-load lifecycle so per-card evaluateJavaScript runs at the right moment
 @MainActor
-final class CardWebViewCoordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler, AVSpeechSynthesizerDelegate {
+final class CardWebViewCoordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler, AVSpeechSynthesizerDelegate, UIGestureRecognizerDelegate {
 
     // MARK: State tracked across updates
 
@@ -40,6 +40,11 @@ final class CardWebViewCoordinator: NSObject, WKNavigationDelegate, WKScriptMess
     var pendingUpdateScript: String?
     var openLinksExternally: Bool = true
     weak var currentWebView: WKWebView?
+    /// Reassigned on every update rather than fixed at creation, so it
+    /// always reaches the reviewer's current state.
+    var onGesture: ((ReviewGesture) -> Void)?
+    /// Scroll position when the touch now in progress began.
+    private var swipeStartOffset: CGPoint?
 
     // MARK: Callbacks (injected by makeCoordinator)
 
@@ -69,11 +74,68 @@ final class CardWebViewCoordinator: NSObject, WKNavigationDelegate, WKScriptMess
         speechSynthesizer.delegate = self
     }
 
+    // MARK: - Swipes
+
+    /// One recognizer per direction, working alongside the web view's own
+    /// scrolling. A swipe that moved the page is a scroll and is ignored.
+    func installSwipeRecognizers(on webView: WKWebView) {
+        let directions: [UISwipeGestureRecognizer.Direction] = [.left, .right, .up, .down]
+        for direction in directions {
+            let recognizer = UISwipeGestureRecognizer(target: self, action: #selector(handleSwipe(_:)))
+            recognizer.direction = direction
+            recognizer.delegate = self
+            // Report the swipe; leave the touches to the page and the scroll view.
+            recognizer.cancelsTouchesInView = false
+            webView.addGestureRecognizer(recognizer)
+        }
+    }
+
+    @objc private func handleSwipe(_ recognizer: UISwipeGestureRecognizer) {
+        guard let onGesture, let webView = currentWebView else { return }
+        // A card a few points too tall still takes a swipe; one that really
+        // scrolled has moved well past this by the time a swipe registers.
+        let offset = webView.scrollView.contentOffset
+        if let start = swipeStartOffset,
+           abs(offset.x - start.x) > 12 || abs(offset.y - start.y) > 12 {
+            return
+        }
+        switch recognizer.direction {
+        case .left: onGesture(.swipeLeft)
+        case .right: onGesture(.swipeRight)
+        case .up: onGesture(.swipeUp)
+        case .down: onGesture(.swipeDown)
+        default: break
+        }
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        if gestureRecognizer is UISwipeGestureRecognizer {
+            swipeStartOffset = currentWebView?.scrollView.contentOffset
+        }
+        return true
+    }
+
     // MARK: - WKScriptMessageHandler
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         if message.name == "amgiShowAnswer" {
             onShowAnswerRequested?()
+            return
+        }
+
+        if message.name == "amgiGesture" {
+            guard let body = message.body as? [String: Any],
+                  let x = (body["x"] as? NSNumber)?.doubleValue,
+                  let y = (body["y"] as? NSNumber)?.doubleValue
+            else { return }
+            onGesture?(.tap(x: x, y: y))
             return
         }
 

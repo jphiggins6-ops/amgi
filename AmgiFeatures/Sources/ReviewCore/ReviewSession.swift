@@ -63,6 +63,8 @@ public final class ReviewSession {
     public private(set) var startError: String?
 
     var reviewStartTime: ContinuousClock.Instant = .now
+    /// When the card last changed or turned over; see `acceptsGestures`.
+    @ObservationIgnored private var lastFlip: ContinuousClock.Instant = .now
     var cardQueue: [QueuedReviewCard] = []
     /// Read once per session; see `ReviewQueueOrder`.
     @ObservationIgnored var defersRepeats: Bool = ReviewPreferences.defersRepeats
@@ -119,6 +121,13 @@ public final class ReviewSession {
 
     public var progressFraction: Double {
         sessionTotal > 0 ? Double(sessionStats.reviewed) / Double(sessionTotal) : 0
+    }
+
+    /// False while a card is changing and for a moment after it turns
+    /// over, so the second tap of a quick double tap on the card can't
+    /// rate the answer the first tap revealed.
+    public var acceptsGestures: Bool {
+        !isAdvancing && lastFlip.duration(to: .now) > .milliseconds(350)
     }
 
     var currentFlag: UInt32 {
@@ -186,6 +195,7 @@ public final class ReviewSession {
         guard !showAnswer else { return }
         backHTML = strippingTypedAnswerPlaceholders(from: renderedBackHTML)
         showAnswer = true
+        lastFlip = .now
 
         guard let state = typedAnswerState else { return }
         let typed = typedAnswer
@@ -469,6 +479,7 @@ private extension ReviewSession {
         nextIntervals = next.nextIntervals
         showAnswer = false
         reviewStartTime = .now
+        lastFlip = .now
         stopAudioRequestID += 1
 
         // Spend the user's reading time rendering the card after this one.

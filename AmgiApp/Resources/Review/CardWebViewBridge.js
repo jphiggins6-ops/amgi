@@ -179,7 +179,31 @@ document.addEventListener('click', function(event) {
     if (state.renderedAt && Date.now() - state.renderedAt < 300) return;
     var payload = amgiCardLookupPayloadAt(event.clientX, event.clientY, state.dictionaryScanLength);
     if (!payload) return;
+    event.__amgiLookedUp = true;
     try { window.webkit.messageHandlers.amgiLookupText.postMessage(payload); } catch(e) {}
+}, false);
+
+// ===== Tap areas (tap → amgiGesture) =====
+// Reports where a tap landed, as fractions of the viewport; the app maps
+// that to one of nine areas and its chosen action. Registered after the
+// lookup listener so a tap that looked a word up is not also reported, and
+// taps meant for something on the card itself are never reported. Swipes
+// are recognized natively, where scrolling can be told apart from them.
+document.addEventListener('click', function(event) {
+    if (event.defaultPrevented || event.__amgiLookedUp) return;
+    var state = amgiCardState();
+    if (state.renderedAt && Date.now() - state.renderedAt < 300) return;
+    var selection = window.getSelection();
+    if (selection && selection.toString().length > 0) return;
+    var target = event.target;
+    if (target && target.closest && target.closest('a, button, input, textarea, select, option, label, summary, details, audio, video, [onclick], [contenteditable], .replay-button, .replay-btn, .sound-btn, #image-occlusion-canvas, #image-occlusion-container')) {
+        return;
+    }
+    var width = window.innerWidth, height = window.innerHeight;
+    if (!width || !height) return;
+    try {
+        window.webkit.messageHandlers.amgiGesture.postMessage({ x: event.clientX / width, y: event.clientY / height });
+    } catch(e) {}
 }, false);
 
 function amgiSetCardCSS(cssText) {

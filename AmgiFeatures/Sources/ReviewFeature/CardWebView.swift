@@ -40,6 +40,7 @@ struct CardWebView {
     let onCardBackgroundColorChange: ((Color, Bool) -> Void)?
     let onLookupRequested: ((String?, String?, CGPoint) -> Void)?
     let onShowAnswerRequested: (() -> Void)?
+    let onGesture: ((ReviewGesture) -> Void)?
 
     init(
         html: String,
@@ -61,7 +62,8 @@ struct CardWebView {
         onAudioStateChange: ((Bool) -> Void)? = nil,
         onCardBackgroundColorChange: ((Color, Bool) -> Void)? = nil,
         onLookupRequested: ((String?, String?, CGPoint) -> Void)? = nil,
-        onShowAnswerRequested: (() -> Void)? = nil
+        onShowAnswerRequested: (() -> Void)? = nil,
+        onGesture: ((ReviewGesture) -> Void)? = nil
     ) {
         self.html = html
         self.cardCSS = cardCSS
@@ -83,6 +85,7 @@ struct CardWebView {
         self.onCardBackgroundColorChange = onCardBackgroundColorChange
         self.onLookupRequested = onLookupRequested
         self.onShowAnswerRequested = onShowAnswerRequested
+        self.onGesture = onGesture
     }
 
     func makeCoordinator() -> CardWebViewCoordinator {
@@ -105,6 +108,7 @@ struct CardWebView {
         config.userContentController.add(coordinator, name: "amgiCardTheme")
         config.userContentController.add(coordinator, name: "amgiLookupText")
         config.userContentController.add(coordinator, name: "amgiShowAnswer")
+        config.userContentController.add(coordinator, name: "amgiGesture")
 
         config.userContentController.addUserScript(WKUserScript(
             source: LookupExtractionScript.source,
@@ -121,7 +125,12 @@ struct CardWebView {
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
         webView.scrollView.showsVerticalScrollIndicator = false
+        // A card that fits must not rubber-band: the bounce would move the
+        // page and turn every swipe into a scroll.
+        webView.scrollView.alwaysBounceVertical = false
+        webView.scrollView.alwaysBounceHorizontal = false
         webView.navigationDelegate = coordinator
+        coordinator.installSwipeRecognizers(on: webView)
         return webView
     }
 
@@ -133,6 +142,7 @@ struct CardWebView {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "amgiCardTheme")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "amgiLookupText")
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "amgiShowAnswer")
+        webView.configuration.userContentController.removeScriptMessageHandler(forName: "amgiGesture")
         coordinator.stopTTS()
     }
 
@@ -156,6 +166,7 @@ struct CardWebView {
         // Bookkeeping that has to track every render, expensive or not.
         coordinator.openLinksExternally = openLinksExternally
         coordinator.currentWebView = webView
+        coordinator.onGesture = onGesture
         webView.overrideUserInterfaceStyle = isDarkMode ? .dark : .light
 
         let pageChanged = coordinator.lastPageSignature != pageSignature
