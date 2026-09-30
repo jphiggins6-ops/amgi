@@ -21,6 +21,7 @@ package struct DeckListView: View {
     private let onSwitchProfile: (AmgiAccount) async -> Void
     private let onSync: () -> Void
     private let onImport: () -> Void
+    private let onOpenSettings: () -> Void
     @Dependency(\.collectionStore) private var store
     @State private var model: DeckListModel
     @State private var showCreateSheet = false
@@ -42,11 +43,13 @@ package struct DeckListView: View {
     package init(
         onSwitchProfile: @escaping (AmgiAccount) async -> Void,
         onSync: @escaping () -> Void,
-        onImport: @escaping () -> Void
+        onImport: @escaping () -> Void,
+        onOpenSettings: @escaping () -> Void = {}
     ) {
         self.onSwitchProfile = onSwitchProfile
         self.onSync = onSync
         self.onImport = onImport
+        self.onOpenSettings = onOpenSettings
         _model = State(initialValue: DeckListModel())
     }
 
@@ -55,11 +58,13 @@ package struct DeckListView: View {
         model: DeckListModel,
         onSwitchProfile: @escaping (AmgiAccount) async -> Void = { _ in },
         onSync: @escaping () -> Void = {},
-        onImport: @escaping () -> Void = {}
+        onImport: @escaping () -> Void = {},
+        onOpenSettings: @escaping () -> Void = {}
     ) {
         self.onSwitchProfile = onSwitchProfile
         self.onSync = onSync
         self.onImport = onImport
+        self.onOpenSettings = onOpenSettings
         _model = State(initialValue: model)
     }
 
@@ -158,6 +163,10 @@ package struct DeckListView: View {
                 }
                 Button(action: onImport) {
                     Label("Import Deck…", systemImage: "square.and.arrow.down")
+                }
+                Divider()
+                Button(action: onOpenSettings) {
+                    Label("Settings", systemImage: "gearshape")
                 }
             } label: {
                 Label("More", systemImage: "ellipsis")

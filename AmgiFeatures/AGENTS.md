@@ -28,10 +28,10 @@ Route shared code down into a sink rather than adding a feature→feature edge.
 
 ## Feature→feature edges
 
-Four exist, each a sheet over another feature's editor: `Review → Browse`,
-`Review → Templates`, `Reader → Browse`, `Decks → Browse`. `RootFeature`
-composes the six screens it hosts, which is a composition root doing its job
-rather than a sideways reach.
+Five exist, each a sheet over another feature's editor: `Review → Browse`,
+`Review → Templates`, `Reader → Browse`, `Decks → Browse`,
+`Graveyard → Browse`. `RootFeature` composes the seven screens it hosts, which
+is a composition root doing its job rather than a sideways reach.
 
 Two edges were deliberately inverted onto an environment key in `AppShared`,
 and both stay that way: `Review → Reader` (`EnvironmentValues.lookupPopup`) and
@@ -78,6 +78,9 @@ watch), plus the sinks those extensions link. Every other `*Feature` is
   XCPreviewAgent is an app. The three previews are plain `#Preview`s at a
   hand-set frame.
 - `WatchFeature` / `WidgetFeature` — only `@main` stays in the extension target.
+- `GraveyardFeature` — the Graveyard tab: red- and orange-flagged cards, each
+  with an AI review (OpenAI Chat Completions, key shared with `MnemonicCore`),
+  a picture for the extra field, a hand edit, or deletion.
 - `IntentsFeature` — `StudyDeckIntent`, `SyncCollectionIntent`, `DueCountIntent`
   and their entities. The `AppShortcutsProvider` cannot live here; see
   `AmgiApp/AGENTS.md`.

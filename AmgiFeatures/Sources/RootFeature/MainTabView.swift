@@ -8,6 +8,7 @@
 import AppCore
 import AnkiKit
 import DecksFeature
+import GraveyardFeature
 import ReaderFeature
 import SettingsFeature
 import StatsFeature
@@ -35,10 +36,12 @@ struct MainTabView: View {
     @Environment(\.startSync) private var startSync
 
     private enum MainTab: Hashable {
-        case library, read, study, stats, settings
+        case library, read, study, stats, graveyard
     }
 
     @State private var selection: MainTab = .library
+    /// Settings lives behind the Library's More menu rather than in a tab.
+    @State private var showSettings = false
 
     var body: some View {
         TabView(selection: $selection) {
@@ -48,8 +51,12 @@ struct MainTabView: View {
                     DeckListView(
                         onSwitchProfile: { await switchProfile(to: $0) },
                         onSync: { startSync() },
-                        onImport: onImport
+                        onImport: onImport,
+                        onOpenSettings: { showSettings = true }
                     )
+                    .navigationDestination(isPresented: $showSettings) {
+                        SettingsView(onSwitchProfile: { await switchProfile(to: $0) })
+                    }
                 }
             }
             // 2. Reader and 3. Study both live in ReaderFeature.
@@ -71,15 +78,18 @@ struct MainTabView: View {
                     StatsDashboardView(refreshID: refreshID)
                 }
             }
-            // 5. Settings
-            Tab("Settings", systemImage: "gearshape", value: MainTab.settings) {
+            // 5. Graveyard — red- and orange-flagged cards, to fix or delete.
+            Tab("Graveyard", systemImage: "flag.2.crossed", value: MainTab.graveyard) {
                 NavigationStack {
-                    SettingsView(onSwitchProfile: { await switchProfile(to: $0) })
+                    GraveyardView()
                 }
             }
         }
         .background {
-            Button("Settings") { selection = .settings }
+            Button("Settings") {
+                selection = .library
+                showSettings = true
+            }
                 .keyboardShortcut(",", modifiers: .command)
                 .opacity(0)
                 .accessibilityHidden(true)

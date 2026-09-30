@@ -179,6 +179,24 @@ private extension MnemonicNoteEditor.Outcome {
     }
 
     /// A retry after an approval that did land must not add the picture twice.
+    @Test func attachingAddsAFinishedPictureWithNoIdeaInvolved() {
+        let attached = MnemonicNoteEditor.attaching(
+            prompt: "optic chiasm, top view",
+            markerId: "m9",
+            mediaFilename: "amgi-mnemonic-42-m9.jpg",
+            to: makeNote(["Q", "A", "Extra text"], tags: "neuro"),
+            fieldNames: extraFields
+        )
+
+        let extra = fields(attached)[2]
+        #expect(extra == "Extra text" + MnemonicMarker.doneBlock(
+            id: "m9", prompt: "optic chiasm, top view", mediaFilename: "amgi-mnemonic-42-m9.jpg"
+        ))
+        #expect(fields(attached)[0] == "Q", "only the extra field changes")
+        #expect(tags(attached) == ["neuro", MnemonicNoteEditor.doneTag])
+        #expect(!tags(attached).contains(MnemonicNoteEditor.pendingTag), "nothing is left waiting")
+    }
+
     @Test func approvingTwiceIsANoOp() throws {
         let captured = MnemonicNoteEditor.capturing(
             idea: "x", markerId: "m1", in: makeNote(["Q", "A", ""]), fieldNames: extraFields

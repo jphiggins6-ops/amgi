@@ -45,6 +45,15 @@ public enum MnemonicPromptStyle {
         One clear subject, exaggerated and slightly absurd so it sticks. \
         Plain white background. No text, letters, labels or numbers.
         """
+
+    /// For pictures that explain rather than stick: what the thing looks
+    /// like, where it is, how it works. Still no text, for the same reason.
+    public static let diagram = """
+        A clear, accurate educational illustration for a medical flashcard. \
+        Show the structure, finding or mechanism plainly and realistically, \
+        in a clean textbook style. Plain white background. \
+        No text, letters, labels or numbers.
+        """
 }
 
 /// THE HOOK: the one place a picture gets made.

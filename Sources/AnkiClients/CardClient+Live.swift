@@ -58,6 +58,9 @@ extension CardClient: DependencyKey {
             search: { query in
                 try await backend.invoke(.searchCardIds(query: query))
             },
+            fetch: { cardId in
+                try await backend.invoke(.getCard(id: cardId))
+            },
             fetchByNote: { noteId in
                 let ids = try await backend.invoke(.cardIDsOfNote(id: noteId))
                 var cards: [CardRecord] = []

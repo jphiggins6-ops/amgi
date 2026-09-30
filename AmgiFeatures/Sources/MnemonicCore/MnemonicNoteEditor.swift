@@ -82,6 +82,27 @@ public enum MnemonicNoteEditor {
         return updated
     }
 
+    /// Adds a finished picture straight to the note, with no idea waiting
+    /// first — for pictures made on the spot rather than from the ✨ inbox.
+    /// Goes where an approved idea's picture would go, in the same block, so
+    /// the two look and behave alike.
+    public static func attaching(
+        prompt: String,
+        markerId: String,
+        mediaFilename: String,
+        to note: NoteRecord,
+        fieldNames: [String]
+    ) -> NoteRecord {
+        var fields = splitFields(note.flds)
+        while fields.count < max(fieldNames.count, 1) { fields.append("") }
+        let target = min(targetFieldIndex(fieldNames: fieldNames), fields.count - 1)
+        fields[target] += MnemonicMarker.doneBlock(id: markerId, prompt: prompt, mediaFilename: mediaFilename)
+
+        var updated = withFields(fields, in: note)
+        updated.tags = adding(doneTag, to: updated.tags)
+        return updated
+    }
+
     public static func pendingItems(in note: NoteRecord, fieldNames: [String]) -> [PendingMnemonic] {
         let fields = splitFields(note.flds)
         let summary = MnemonicText.summary(fields.first ?? "")

@@ -47,6 +47,7 @@ let package = Package(
         .library(name: "ReviewCore", targets: ["ReviewCore"]),
         .library(name: "ReviewFeature", targets: ["ReviewFeature"]),
         .library(name: "DecksFeature", targets: ["DecksFeature"]),
+        .library(name: "GraveyardFeature", targets: ["GraveyardFeature"]),
         .library(name: "WidgetFeature", targets: ["WidgetFeature"]),
         .library(name: "SettingsFeature", targets: ["SettingsFeature"]),
         .library(name: "WatchFeature", targets: ["WatchFeature"]),
@@ -424,6 +425,35 @@ let package = Package(
             ],
             swiftSettings: sharedSwiftSettings
         ),
+        // The Graveyard tab: every red- or orange-flagged card, and what to do
+        // about each — an AI review that can rewrite it, a picture for its
+        // extra field, a hand edit, or deletion. Pictures and the OpenAI key
+        // come from MnemonicCore; the hand edit is a sheet over
+        // BrowseFeature's note editor, the same kind of edge Review → Browse is.
+        .target(
+            name: "GraveyardFeature",
+            dependencies: [
+                "AppCore",
+                "AppShared",
+                "MnemonicCore",
+                "BrowseFeature",
+                .product(name: "AnkiKit", package: "amgi"),
+                .product(name: "AnkiClients", package: "amgi"),
+                .product(name: "Dependencies", package: "swift-dependencies"),
+            ],
+            swiftSettings: sharedSwiftSettings
+        ),
+        .testTarget(
+            name: "GraveyardFeatureTests",
+            dependencies: [
+                "GraveyardFeature",
+                "MnemonicCore",
+                .product(name: "AnkiKit", package: "amgi"),
+                .product(name: "AnkiClients", package: "amgi"),
+                .product(name: "Dependencies", package: "swift-dependencies"),
+            ],
+            swiftSettings: sharedSwiftSettings
+        ),
         // Everything the watchOS app renders: its content root, deck list,
         // deck detail, review, stats and login screens. Only @main WatchApp
         // stays in the AmgiWatchApp target, holding the backend/collection
@@ -475,6 +505,7 @@ let package = Package(
                 "AppCore",
                 "AppShared",
                 "DecksFeature",
+                "GraveyardFeature",
                 "ReaderFeature",
                 "ReviewFeature",
                 "SettingsFeature",

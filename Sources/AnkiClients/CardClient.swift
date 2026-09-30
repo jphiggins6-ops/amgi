@@ -18,6 +18,7 @@ public struct CardClient: Sendable {
     public var fetchQueue: @Sendable (_ deckId: DeckID, _ limit: Int) async throws -> [CardRecord]
     /// Ids of the cards matching an Anki search, unordered.
     public var search: @Sendable (_ query: String) async throws -> [CardID]
+    public var fetch: @Sendable (_ cardId: CardID) async throws -> CardRecord
     public var fetchByNote: @Sendable (_ noteId: NoteID) async throws -> [CardRecord]
     public var suspend: @Sendable (_ cardId: CardID) async throws -> Void
     public var bury: @Sendable (_ cardId: CardID) async throws -> Void

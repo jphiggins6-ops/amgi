@@ -24,19 +24,24 @@ public struct MnemonicClient: Sendable {
     /// Writes the picture to media, then swaps the idea for it. Idempotent.
     public var approve: @Sendable (_ item: PendingMnemonic, _ prompt: String, _ image: MnemonicImage) async throws -> Void
     public var discard: @Sendable (_ item: PendingMnemonic) async throws -> Void
+    /// Writes a picture to media and adds it straight to the note's extra
+    /// field, with no pending idea involved.
+    public var attach: @Sendable (_ noteId: NoteID, _ prompt: String, _ image: MnemonicImage) async throws -> Void
 
     public init(
         capture: @escaping @Sendable (_ noteId: NoteID, _ idea: String) async throws -> Void,
         pending: @escaping @Sendable () async throws -> [PendingMnemonic],
         updateIdea: @escaping @Sendable (_ item: PendingMnemonic, _ idea: String) async throws -> Void,
         approve: @escaping @Sendable (_ item: PendingMnemonic, _ prompt: String, _ image: MnemonicImage) async throws -> Void,
-        discard: @escaping @Sendable (_ item: PendingMnemonic) async throws -> Void
+        discard: @escaping @Sendable (_ item: PendingMnemonic) async throws -> Void,
+        attach: @escaping @Sendable (_ noteId: NoteID, _ prompt: String, _ image: MnemonicImage) async throws -> Void
     ) {
         self.capture = capture
         self.pending = pending
         self.updateIdea = updateIdea
         self.approve = approve
         self.discard = discard
+        self.attach = attach
     }
 }
 
@@ -118,6 +123,27 @@ extension MnemonicClient: DependencyKey {
                 case .alreadyApplied, .markerMissing:
                     return
                 }
+            },
+            attach: { noteId, prompt, image in
+                guard let note = try await notes.fetch(noteId) else { throw MnemonicError.noteNotFound }
+                let fieldNames = try await notetypes.get(note.mid).fields.map(\.name)
+                let markerId = MnemonicMarker.newID()
+                let filename = MnemonicNoteEditor.mediaFilename(
+                    noteId: noteId,
+                    markerId: markerId,
+                    fileExtension: image.fileExtension
+                )
+                let updated = MnemonicNoteEditor.attaching(
+                    prompt: prompt,
+                    markerId: markerId,
+                    mediaFilename: filename,
+                    to: note,
+                    fieldNames: fieldNames
+                )
+                // Media first, as in approve: a note must never point at a
+                // file that isn't there.
+                try await media.save(image.data, filename)
+                try await notes.save(updated)
             }
         )
     }()
@@ -127,7 +153,8 @@ extension MnemonicClient: DependencyKey {
         pending: { throw MnemonicError.unimplemented("MnemonicClient.pending") },
         updateIdea: { _, _ in throw MnemonicError.unimplemented("MnemonicClient.updateIdea") },
         approve: { _, _, _ in throw MnemonicError.unimplemented("MnemonicClient.approve") },
-        discard: { _ in throw MnemonicError.unimplemented("MnemonicClient.discard") }
+        discard: { _ in throw MnemonicError.unimplemented("MnemonicClient.discard") },
+        attach: { _, _, _ in throw MnemonicError.unimplemented("MnemonicClient.attach") }
     )
 }
 
