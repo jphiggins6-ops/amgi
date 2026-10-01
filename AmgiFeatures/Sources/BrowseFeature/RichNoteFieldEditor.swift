@@ -56,11 +56,13 @@ struct RichNoteFieldEditor: UIViewRepresentable {
         return textView
     }
 
+    /// As tall as the whole field, so the form scrolls through it. Capping
+    /// the height (it was 160 pt) cut long fields off: scrolling inside the
+    /// text view is off, so the rest of the field was unreachable.
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
         let fit = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
-        let height = min(max(32, fit.height), 160)
-        return CGSize(width: width, height: height)
+        return CGSize(width: width, height: max(32, ceil(fit.height)))
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
@@ -106,6 +108,25 @@ struct RichNoteFieldEditor: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             commit(textView.text ?? "")
+            Self.keepCaretVisible(in: textView)
+        }
+
+        /// The field grows as it's typed into; once it has, scroll the form
+        /// so the line being typed isn't left under the keyboard. A no-op
+        /// whenever the caret is already in view.
+        static func keepCaretVisible(in textView: UITextView) {
+            Task { @MainActor [weak textView] in
+                // Let the grown field be laid out first.
+                try? await Task.sleep(for: .milliseconds(30))
+                guard let textView, let position = textView.selectedTextRange?.end else { return }
+                var ancestor = textView.superview
+                while let view = ancestor, !(view is UIScrollView) {
+                    ancestor = view.superview
+                }
+                guard let scrollView = ancestor as? UIScrollView else { return }
+                let caret = textView.caretRect(for: position).insetBy(dx: 0, dy: -16)
+                scrollView.scrollRectToVisible(textView.convert(caret, to: scrollView), animated: false)
+            }
         }
 
         func insert(_ string: String) {
