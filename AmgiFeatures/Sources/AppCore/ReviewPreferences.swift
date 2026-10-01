@@ -34,6 +34,7 @@ public enum ReviewPreferences {
         public static let glassAnswerButtons = "review_pref_glass_answer_buttons"
         public static let autoMatchCardBackground = "review_pref_auto_match_card_background"
         public static let defersRepeats = "review_pref_defers_repeats"
+        public static let showTimeLeft = "review_pref_show_time_left"
     }
 
     /// Whether a review shows every due card once before bringing back

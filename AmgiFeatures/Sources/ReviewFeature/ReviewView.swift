@@ -45,6 +45,9 @@ package struct ReviewView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.showNextReviewTime))
     private var showNextReviewTime: Bool = true
 
+    @Shared(.appStorage(ReviewPreferences.Keys.showTimeLeft))
+    private var showTimeLeft: Bool = true
+
     @Shared(.appStorage(ReaderPreferences.Keys.tapLookup))
     private var tapLookup: Bool = true
 
@@ -80,6 +83,7 @@ package struct ReviewView: View {
             tapLookup: tapLookup,
             showNextReviewTime: showNextReviewTime,
             destination: $destination,
+            showTimeLeft: Binding($showTimeLeft),
             onDismiss: {
                 // Recorded before handing back, so the screen underneath
                 // reloads its counts after the limits have been charged.

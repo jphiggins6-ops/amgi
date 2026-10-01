@@ -397,6 +397,7 @@ import AnkiServices
 
             #expect(s.sessionStats.reviewed == 1)
             #expect(s.sessionStats.correct == 1, "Good counts as correct")
+            #expect(s.pace.answerCount == 1, "the answer sets the pace for the time left")
             #expect(s.canUndo)
             #expect(s.currentNote == note2, "should advance to the second card")
             #expect(!s.isAdvancing, "isAdvancing clears once the answer settles")
@@ -644,8 +645,10 @@ import AnkiServices
             try await pollUntil { s.isFinished && !s.isAdvancing }
 
             // Take the second answer back: only the first card stays charged.
+            #expect(s.pace.answerCount == 2)
             s.undo()
             try await pollUntil { s.currentCardId == fromNeuro.card.id && !s.isAdvancing }
+            #expect(s.pace.answerCount == 1, "an undone answer no longer counts toward the pace")
 
             await s.recordNewCardsStudied()
             #expect(progress.chargedEntries == ["5:1"])
@@ -654,5 +657,69 @@ import AnkiServices
             await s.recordNewCardsStudied()
             #expect(progress.chargedEntries == ["5:1"])
         }
+    }
+
+    // MARK: - Time left
+
+    private static func pace(answersOf seconds: [Double], missing misses: Int = 0) -> ReviewPace {
+        var pace = ReviewPace()
+        for (index, answer) in seconds.enumerated() {
+            pace.record(milliseconds: Int(answer * 1000), missed: index < misses)
+        }
+        return pace
+    }
+
+    @Test func noEstimateUntilAFewCardsHaveSetAPace() {
+        let counts = DeckCounts(newCount: 0, learnCount: 0, reviewCount: 10)
+        #expect(Self.pace(answersOf: [10, 10]).secondsLeft(for: counts) == nil)
+        #expect(Self.pace(answersOf: [10, 10, 10]).secondsLeft(for: counts) != nil)
+    }
+
+    /// Three 10-second answers and no misses yet: the miss rate leans on
+    /// one in ten, (0 + 0.5) / (3 + 5), so ten cards take ten answers and
+    /// the repeats those misses bring back.
+    @Test func theEstimateIsCardsLeftAtThisSessionsPace() throws {
+        let pace = Self.pace(answersOf: [8, 10, 12])
+        let left = try #require(pace.secondsLeft(for: DeckCounts(newCount: 0, learnCount: 0, reviewCount: 10)))
+        #expect(abs(left - 10 / (1 - 0.0625) * 10) < 0.001)
+    }
+
+    @Test func aNewCardCountsTwiceForItsLearningStep() throws {
+        let pace = Self.pace(answersOf: [10, 10, 10])
+        let reviews = try #require(pace.secondsLeft(for: DeckCounts(newCount: 0, learnCount: 0, reviewCount: 6)))
+        let newCards = try #require(pace.secondsLeft(for: DeckCounts(newCount: 3, learnCount: 0, reviewCount: 0)))
+        #expect(abs(reviews - newCards) < 0.001)
+    }
+
+    @Test func moreMissesMeanMoreTimeLeft() throws {
+        let counts = DeckCounts(newCount: 0, learnCount: 2, reviewCount: 8)
+        let steady = try #require(Self.pace(answersOf: [10, 10, 10, 10]).secondsLeft(for: counts))
+        let shaky = try #require(Self.pace(answersOf: [10, 10, 10, 10], missing: 2).secondsLeft(for: counts))
+        #expect(shaky > steady)
+    }
+
+    @Test func aCardLeftOpenCountsAsAMinuteAtMost() throws {
+        let counts = DeckCounts(newCount: 0, learnCount: 0, reviewCount: 1)
+        let away = try #require(Self.pace(answersOf: [600, 600, 600]).secondsLeft(for: counts))
+        let slow = try #require(Self.pace(answersOf: [60, 60, 60]).secondsLeft(for: counts))
+        #expect(away == slow)
+    }
+
+    @Test func anUndoneAnswerNoLongerCounts() {
+        var pace = Self.pace(answersOf: [10, 10, 10])
+        pace.removeLast()
+        #expect(pace.answerCount == 2)
+        #expect(pace.secondsLeft(for: DeckCounts(newCount: 0, learnCount: 0, reviewCount: 5)) == nil)
+    }
+
+    @Test func theTimeLeftReadsAsMinutesAndAFinishTime() {
+        let now = Date(timeIntervalSince1970: 0)
+        #expect(ReviewPace.summary(secondsLeft: nil, now: now) == "Measuring your pace…")
+        #expect(ReviewPace.summary(secondsLeft: 20, now: now) == "Less than a minute left")
+        let summary = ReviewPace.summary(secondsLeft: 125 * 60, now: now)
+        #expect(summary.hasPrefix("About 2 h 5 min left · done around "))
+        #expect(ReviewPace.duration(minutes: 12) == "12 min")
+        #expect(ReviewPace.duration(minutes: 60) == "1 h")
+        #expect(ReviewPace.duration(minutes: 61) == "1 h 1 min")
     }
 }

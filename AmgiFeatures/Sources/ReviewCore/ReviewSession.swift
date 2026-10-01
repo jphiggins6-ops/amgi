@@ -41,6 +41,9 @@ public final class ReviewSession {
     public private(set) var showAnswer: Bool = false
     public private(set) var sessionStats: SessionStats = .init()
     public private(set) var remainingCounts: DeckCounts = .zero
+    /// How quickly this session's cards are being answered; see
+    /// `estimatedSecondsLeft`.
+    public private(set) var pace = ReviewPace()
     public private(set) var deckName: String = ""
     public private(set) var isFinished: Bool = false
     public private(set) var canUndo: Bool = false
@@ -131,6 +134,12 @@ public final class ReviewSession {
 
     public var progressFraction: Double {
         sessionTotal > 0 ? Double(sessionStats.reviewed) / Double(sessionTotal) : 0
+    }
+
+    /// Roughly how long the cards still to come will take at this session's
+    /// pace, or nil until a few answers have set one. See `ReviewPace`.
+    public var estimatedSecondsLeft: Double? {
+        isFinished ? nil : pace.secondsLeft(for: remainingCounts)
     }
 
     /// False while a card is changing and for a moment after it turns
@@ -274,6 +283,7 @@ public final class ReviewSession {
                     sessionStats.reviewed += 1
                     if rating != .again { sessionStats.correct += 1 }
                     sessionStats.totalTimeMs += Int(timeSpent)
+                    pace.record(milliseconds: Int(timeSpent), missed: rating == .again)
                     lastRating = rating
                     canUndo = true
                     if let homeDeckToTally {
@@ -333,6 +343,7 @@ public final class ReviewSession {
                     if last != .again {
                         sessionStats.correct = max(0, sessionStats.correct - 1)
                     }
+                    pace.removeLast()
                     if let deck = lastTalliedHomeDeck {
                         newCardsStudied[deck, default: 0] -= 1
                     }
@@ -607,6 +618,9 @@ extension ReviewSession {
         session.showAnswer = showAnswer
         session.isFinished = isFinished
         session.sessionStats = SessionStats(reviewed: reviewed, correct: 6, totalTimeMs: 42_000)
+        for _ in 0..<max(reviewed, 0) {
+            session.pace.record(milliseconds: 6_000, missed: false)
+        }
         session.remainingCounts = counts
         session.deckName = "한국어 · Vocab Typing"
         session.nextIntervals = [.again: "<1m", .hard: "8m", .good: "1d", .easy: "4d"]

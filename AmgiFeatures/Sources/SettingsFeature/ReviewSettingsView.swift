@@ -34,9 +34,13 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.defersRepeats))
     private var defersRepeats: Bool = true
 
+    @Shared(.appStorage(ReviewPreferences.Keys.showTimeLeft))
+    private var showTimeLeft: Bool = true
+
     var body: some View {
         SettingsPage {
             cardOrderSection
+            progressSection
             gesturesSection
             cardDisplaySection
             answerButtonsSection
@@ -58,6 +62,21 @@ struct ReviewSettingsView: View {
                 )
             }
             SettingsFootnote("Cards you miss, and cards you're still learning, come back only after every other due card has had its turn. Turn off for Anki's usual order, where a card you miss can come back within minutes.")
+        }
+    }
+
+    private var progressSection: some View {
+        Group {
+            SettingsSectionHeader(title: "Progress")
+            SettingsGroup {
+                SettingsToggleRow(
+                    title: "Show time left",
+                    systemImage: "timer",
+                    tone: .info,
+                    isOn: Binding($showTimeLeft)
+                )
+            }
+            SettingsFootnote("Shown at the top while reviewing, worked out from how fast you've answered so far this session, with extra turns for new cards and for cards you miss. You can also turn it off from the ⋯ menu while reviewing.")
         }
     }
 

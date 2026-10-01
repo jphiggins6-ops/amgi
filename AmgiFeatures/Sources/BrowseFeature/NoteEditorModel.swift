@@ -12,6 +12,7 @@ import AnkiKit
 import AnkiClients
 import AnkiServices
 import Dependencies
+import Foundation
 import SwiftUI
 
 /// Field/tag state + load/save logic for editing an existing note. The View
@@ -24,9 +25,15 @@ final class NoteEditorModel {
     var fieldValues: [String] = []
     var tags: String = ""
     var isSaving = false
+    /// Bumped by each paste. The field editors are rebuilt from it, so they
+    /// show what was added, and a field that gained a picture switches to
+    /// HTML editing.
+    private(set) var pasteCount = 0
+    var pasteError: String?
 
     @ObservationIgnored @Dependency(\.noteClient) private var noteClient
     @ObservationIgnored @Dependency(\.notetypesService) private var notetypesService
+    @ObservationIgnored @Dependency(\.mediaClient) private var mediaClient
     @ObservationIgnored private let note: NoteRecord
 
     init(note: NoteRecord) {
@@ -58,6 +65,66 @@ final class NoteEditorModel {
         while fieldValues.count < fieldNames.count { fieldValues.append("") }
         tags = note.tags.trimmingCharacters(in: .whitespaces)
     }
+
+    // MARK: - Paste
+
+    /// The field Paste adds to; see `NotePaste.targetFieldIndex`.
+    var pasteTargetIndex: Int? {
+        NotePaste.targetFieldIndex(fieldNames: fieldNames, fieldCount: fieldValues.count)
+    }
+
+    var pasteTargetName: String? {
+        guard let index = pasteTargetIndex, index < fieldNames.count else { return nil }
+        return fieldNames[index]
+    }
+
+    /// Adds what was copied, pictures and text in clipboard order, to the
+    /// end of the field extras go in. A picture is stored as media straight
+    /// away; the note itself waits for Save, like any other edit.
+    func paste(_ items: [PastedItem]) async {
+        var parts: [String] = []
+        var failedPictures = 0
+        for item in items {
+            switch item {
+            case .text(let text):
+                let html = NotePaste.html(forText: text)
+                if !html.isEmpty { parts.append(html) }
+            case .image(let data):
+                if let tag = await storePicture(data) {
+                    parts.append(tag)
+                } else {
+                    failedPictures += 1
+                }
+            }
+        }
+        if failedPictures > 0 {
+            pasteError = failedPictures == 1
+                ? "The picture couldn't be added."
+                : "\(failedPictures) pictures couldn't be added."
+        }
+        guard !parts.isEmpty, let target = pasteTargetIndex else { return }
+        fieldValues[target] = NotePaste.appending(parts.joined(separator: "<br>"), to: fieldValues[target])
+        pasteCount += 1
+    }
+
+    /// Saves a pasted picture to the media folder; returns the tag that
+    /// shows it on the card.
+    private func storePicture(_ data: Data) async -> String? {
+        let prepared = await Task.detached(priority: .userInitiated) {
+            PreparedImage.prepare(data)
+        }.value
+        guard let prepared else { return nil }
+        let filename = NotePaste.mediaFilename(for: prepared.data, fileExtension: prepared.fileExtension)
+        do {
+            try await mediaClient.save(prepared.data, filename)
+            return NotePaste.imageTag(filename: filename)
+        } catch {
+            Log.browse.error("Saving a pasted picture failed: \(error)")
+            return nil
+        }
+    }
+
+    // MARK: - Save
 
     /// Persist the edited fields/tags. Returns whether the write succeeded.
     func save() async -> Bool {

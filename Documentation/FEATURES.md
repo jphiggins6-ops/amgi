@@ -5,7 +5,8 @@ What Amgi does today. For how it is put together, see [ARCHITECTURE.md](ARCHITEC
 ## Studying
 
 - **FSRS scheduling** — the official Rust FSRS engine, not a reimplementation. Ratings, intervals, and review history are computed by the same code as Anki Desktop.
-- **Review session** — Again/Hard/Good/Easy with the next interval printed on every button, session progress, rating toast with auto-advance, native typed-answer field, tap-to-play audio, and undo.
+- **Review session** — Again/Hard/Good/Easy with the next interval printed on every button, session progress, rating toast with auto-advance, native typed-answer field, tap-to-play audio, undo, and a pencil in the top bar that opens the card's note for editing in one tap.
+- **Time left** — under the progress bar, "About 12 min left · done around 3:42 PM", worked out from how fast you've answered so far this session, with an extra turn for each new card's learning step and for the repeats your misses bring back. Hide it from the ⋯ menu while reviewing, or Settings → Review → Progress.
 - **Reviews and New buttons** — the Library's top card has one big button for reviews and one for new cards, each with its own count. Reviews gathers every due card that has no flag and isn't in deck "p"; New gathers today's new cards from every deck but "p", picked from each deck's own queue so its daily limit and new-card order hold. Both are shuffled across decks, and new cards learned this way are charged to their home decks' daily limits when the session closes, as studying the deck itself would.
 - **Every due card before repeats** — on by default: a card you miss, or one still in learning, waits until every other due card has been shown once. Only the order changes; the engine still schedules each answer when you give it. Settings → Review → Card Order switches back to Anki's usual order.
 - **Taps, swipes and shake** — nine tap areas on the card, four swipes, and a shake of the phone, each set to show the answer, rate, undo, replay audio, flag, edit the note, or capture a visual mnemonic (Settings → Review Behavior → Taps, Swipes & Shake). A rating on the question side shows the answer instead; taps on links, audio buttons, and looked-up words behave as before, and a swipe that scrolls a long card counts as scrolling.
@@ -28,7 +29,7 @@ What Amgi does today. For how it is put together, see [ARCHITECTURE.md](ARCHITEC
 ## Notes
 
 - **Browser** — search the whole collection with Anki search syntax, deck filter chips (a top-level deck includes its subdecks), tag chips, sorting, and lazy-loaded results.
-- **Editor** — rich field editing with accurate field names pulled from the Rust notetype RPC; multi-select for batch operations.
+- **Editor** — rich field editing with accurate field names pulled from the Rust notetype RPC; multi-select for batch operations. Paste (top left) adds whatever you've copied, text or pictures, to the end of the Extra field (or Back Extra / Back / the last field), with no "Allow Paste?" prompt. Pictures are stored as media named for their content, as Anki names pastes, at most 1600 px and as JPEGs unless they have see-through parts.
 - **Tags** — batch tagging from a selection, plus collection-wide tag management.
 - **Duplicates** — find notes that share a first field, which is the question Anki's `dupe:` operator does not answer.
 - **Image occlusion** — create and edit occlusion notes with rectangle, ellipse, polygon, and text masks, with reviewer parity with upstream Anki.

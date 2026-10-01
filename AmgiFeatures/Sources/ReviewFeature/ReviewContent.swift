@@ -36,6 +36,9 @@ struct ReviewContent: View {
     let tapLookup: Bool
     let showNextReviewTime: Bool
     @Binding var destination: ReviewDestination?
+    /// The estimated time left under the progress bar. A binding so the ⋯
+    /// menu can switch it off right there.
+    @Binding var showTimeLeft: Bool
     let onDismiss: () -> Void
 
     @Environment(\.palette) private var palette
@@ -64,6 +67,10 @@ struct ReviewContent: View {
 
                 if showRemainingDays && session.startError == nil {
                     ReviewProgressBar(session: session)
+                }
+
+                if showTimeLeft && session.startError == nil && !session.isFinished {
+                    ReviewTimeLeft(session: session)
                 }
 
                 if let startError = session.startError {
@@ -104,6 +111,9 @@ struct ReviewContent: View {
                     }
                     .accessibilityLabel("Close")
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    ReviewEditButton(session: session, destination: $destination, shortcutEnabled: keyboardActive)
+                }
                 ToolbarItem(placement: .principal) {
                     ReviewDeckTitle(session: session)
                 }
@@ -123,7 +133,8 @@ struct ReviewContent: View {
                         session: session,
                         cardActions: cardActions,
                         destination: $destination,
-                        confirmDeleteNote: $confirmDeleteNote
+                        confirmDeleteNote: $confirmDeleteNote,
+                        showTimeLeft: $showTimeLeft
                     )
                 }
             }
@@ -224,6 +235,7 @@ struct ReviewContent: View {
                 Image(systemName: "xmark")
             }
             .accessibilityLabel("Close")
+            ReviewEditButton(session: session, destination: $destination, shortcutEnabled: keyboardActive)
 
             Spacer()
             ReviewDeckTitle(session: session)
@@ -238,7 +250,8 @@ struct ReviewContent: View {
                 session: session,
                 cardActions: cardActions,
                 destination: $destination,
-                confirmDeleteNote: $confirmDeleteNote
+                confirmDeleteNote: $confirmDeleteNote,
+                showTimeLeft: $showTimeLeft
             )
         }
         .buttonStyle(.plain)
@@ -351,6 +364,24 @@ private struct ReviewUndoButton: View {
     }
 }
 
+/// Opens the card's note for editing in one tap. Also in the ⋯ menu.
+private struct ReviewEditButton: View {
+    let session: ReviewSession
+    @Binding var destination: ReviewDestination?
+    let shortcutEnabled: Bool
+
+    var body: some View {
+        Button {
+            destination = session.currentNote.map(ReviewDestination.editNote)
+        } label: {
+            Image(systemName: "pencil")
+        }
+        .disabled(session.currentNote == nil)
+        .keyboardShortcut(shortcutEnabled ? KeyboardShortcut("e", modifiers: .command) : nil)
+        .accessibilityLabel("Edit Note")
+    }
+}
+
 private struct MnemonicCaptureButton: View {
     let session: ReviewSession
     @Binding var destination: ReviewDestination?
@@ -373,8 +404,13 @@ private struct CardActionsMenu: View {
     let cardActions: CardContextMenuModel
     @Binding var destination: ReviewDestination?
     @Binding var confirmDeleteNote: Bool
+    @Binding var showTimeLeft: Bool
 
     @Environment(\.palette) private var palette
+
+    private var timeLeftToggleTitle: String {
+        showTimeLeft ? "Hide Time Left" : "Show Time Left"
+    }
 
     var body: some View {
         Menu {
@@ -421,6 +457,14 @@ private struct CardActionsMenu: View {
                 .disabled(session.currentNote == nil)
             }
 
+            Section {
+                Button {
+                    showTimeLeft.toggle()
+                } label: {
+                    Label(timeLeftToggleTitle, systemImage: "timer")
+                }
+            }
+
             if let cardId = session.currentCardId {
                 CardActionSections(
                     model: cardActions,
@@ -461,6 +505,37 @@ private struct ReviewProgressBar: View {
         .padding(.top, 6)
         .padding(.bottom, 2)
         .animation(AmgiMotion.standard, value: fraction)
+    }
+}
+
+// MARK: - Time left
+
+/// "About 12 min left · done around 3:42 PM", from how fast this session's
+/// cards have been answered (`ReviewSession.estimatedSecondsLeft`). Ticks
+/// each minute, so the finish time moves on while a card stays up.
+private struct ReviewTimeLeft: View {
+    let session: ReviewSession
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let secondsLeft = session.estimatedSecondsLeft
+        TimelineView(.everyMinute) { context in
+            HStack(spacing: 4) {
+                Image(systemName: "timer")
+                    .accessibilityHidden(true)
+                Text(verbatim: ReviewPace.summary(secondsLeft: secondsLeft, now: context.date))
+            }
+            .amgiFont(.caption, .monospacedDigits)
+            .foregroundStyle(palette.textSecondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal)
+            .padding(.top, 4)
+            .padding(.bottom, 2)
+            .accessibilityElement(children: .combine)
+        }
     }
 }
 
@@ -528,6 +603,7 @@ private struct ReviewFinishedView: View {
         tapLookup: true,
         showNextReviewTime: true,
         destination: .constant(nil),
+        showTimeLeft: .constant(true),
         onDismiss: {}
     )
 }
@@ -542,6 +618,7 @@ private struct ReviewFinishedView: View {
         tapLookup: true,
         showNextReviewTime: true,
         destination: .constant(nil),
+        showTimeLeft: .constant(true),
         onDismiss: {}
     )
 }
@@ -556,6 +633,7 @@ private struct ReviewFinishedView: View {
         tapLookup: true,
         showNextReviewTime: true,
         destination: .constant(nil),
+        showTimeLeft: .constant(true),
         onDismiss: {}
     )
 }

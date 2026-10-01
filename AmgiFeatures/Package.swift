@@ -163,6 +163,8 @@ let package = Package(
             name: "BrowseFeature",
             dependencies: [
                 "AppShared",
+                // Paste puts things in the field a mnemonic picture goes to.
+                "MnemonicCore",
                 .product(name: "AnkiKit", package: "amgi"),
                 .product(name: "AnkiClients", package: "amgi"),
                 .product(name: "AnkiServices", package: "amgi"),
@@ -234,9 +236,10 @@ let package = Package(
             swiftSettings: sharedSwiftSettings
         ),
         // Visual mnemonics: capture an idea mid-review, make and approve the
-        // picture later. A sink, so ReviewFeature (the ✨ sheet) and
-        // DecksFeature (the review list) share it without an edge between
-        // them. Pending ideas live inside the notes themselves as HTML
+        // picture later. A sink, so ReviewFeature (the ✨ sheet),
+        // DecksFeature (the review list) and BrowseFeature (the editor's
+        // Paste, which uses the same Extra field) share it without an edge
+        // between them. Pending ideas live inside the notes themselves as HTML
         // comments — see MnemonicMarker — so there is no queue to persist.
         .target(
             name: "MnemonicCore",
