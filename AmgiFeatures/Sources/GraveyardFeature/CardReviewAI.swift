@@ -75,7 +75,8 @@ enum CardReviewPrompt {
         to null. Name fields exactly as below, give each changed field's complete new \
         content, and leave unchanged fields out. Keep the card's HTML formatting, cloze \
         deletions such as {{c1::...}}, images (<img ...>), sound tags ([sound:...]) and \
-        HTML comments exactly as they are, unless they are the problem.
+        HTML comments exactly as they are, unless they are the problem. Start a new line \
+        with <br>: a card ignores a plain line break.
 
         The card, a "\(card.notetypeName)" note in the deck "\(card.deckName)", \
         as its fields in order:
@@ -148,8 +149,9 @@ enum CardFieldEdits {
             guard let index = fieldNames.firstIndex(where: {
                 $0.caseInsensitiveCompare(wanted) == .orderedSame
             }) else { continue }
-            if fields[index] != proposed.value {
-                fields[index] = proposed.value
+            let value = storableValue(proposed.value)
+            if fields[index] != value {
+                fields[index] = value
                 changed = true
             }
         }
@@ -171,6 +173,14 @@ enum CardFieldEdits {
 
     static func splitFields(_ flds: String) -> [String] {
         flds.split(separator: "\u{1f}", omittingEmptySubsequences: false).map(String.init)
+    }
+
+    /// A model sometimes writes a line break as a raw newline, which a card
+    /// shows as a space; Anki's line break is `<br>`.
+    static func storableValue(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\n", with: "<br>")
     }
 }
 

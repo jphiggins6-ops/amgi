@@ -70,6 +70,15 @@ import AnkiKit
         #expect(updated.sfld == "Dose of Y?")
     }
 
+    @Test func aRawLineBreakFromTheModelIsStoredAsBR() throws {
+        let updated = try #require(CardFieldEdits.applying(
+            [ProposedField(name: "Back", value: "Ptosis\nMydriasis\r\nDown and out")],
+            to: note(["Q", "A"]),
+            fieldNames: ["Front", "Back"]
+        ))
+        #expect(CardFieldEdits.splitFields(updated.flds)[1] == "Ptosis<br>Mydriasis<br>Down and out")
+    }
+
     @Test func unknownFieldNamesAreSkippedAndReported() {
         let proposal = [ProposedField(name: "Answer", value: "x")]
         #expect(CardFieldEdits.applying(proposal, to: note(["Q", "A"]), fieldNames: ["Front", "Back"]) == nil)

@@ -91,6 +91,11 @@ struct NoteEditorContent: View {
                             .amgiFont(.caption)
                             .foregroundStyle(palette.textSecondary)
                         RichNoteFieldEditor(htmlText: $model[fieldAt: index])
+                        if !FieldText.isPlain(model[fieldAt: index]) {
+                            Text("Shown as HTML so its formatting and pictures are kept. Return starts a new line.")
+                                .amgiFont(.caption)
+                                .foregroundStyle(palette.textSecondary)
+                        }
                     }
                 }
             }
