@@ -36,7 +36,7 @@ import AnkiKit
     @Test func everyTapAreaAppearsOnceInGridOrder() {
         #expect(ReviewGesture.taps.count == 9)
         #expect(Set(ReviewGesture.taps).count == 9)
-        #expect(Set(ReviewGesture.taps + ReviewGesture.swipes) == Set(ReviewGesture.allCases))
+        #expect(Set(ReviewGesture.taps + ReviewGesture.swipes + [.shake]) == Set(ReviewGesture.allCases))
     }
 
     @Test func onlyTheFourAnswerActionsRate() {
@@ -51,6 +51,10 @@ import AnkiKit
 
         #expect(ReviewPreferences.gestureAction(for: .tapCenter, in: defaults) == .good)
         #expect(ReviewPreferences.gestureAction(for: .tapTopLeft, in: defaults) == .nothing)
+        #expect(ReviewPreferences.gestureAction(for: .shake, in: defaults) == .nothing, "a shake does nothing until it's set")
+
+        ReviewPreferences.setGestureAction(.undo, for: .shake, in: defaults)
+        #expect(ReviewPreferences.gestureAction(for: .shake, in: defaults) == .undo)
 
         ReviewPreferences.setGestureAction(.undo, for: .tapTopLeft, in: defaults)
         #expect(ReviewPreferences.gestureAction(for: .tapTopLeft, in: defaults) == .undo)

@@ -66,7 +66,7 @@ struct ReviewSettingsView: View {
             SettingsSectionHeader(title: "Gestures")
             SettingsGroup {
                 SettingsRowLink(
-                    title: "Taps & Swipes",
+                    title: "Taps, Swipes & Shake",
                     systemImage: "hand.tap",
                     tone: .accent
                 ) {

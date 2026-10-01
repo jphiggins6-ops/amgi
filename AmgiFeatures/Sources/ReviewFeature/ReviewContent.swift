@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Foundation
 import AmgiCardWeb
 import Theme
 import UI
@@ -87,6 +88,11 @@ struct ReviewContent: View {
             .reviewHaptics(session: session)
             .sensoryFeedback(.success, trigger: mnemonicSavedCount)
             .sensoryFeedback(.selection, trigger: gestureFlagCount)
+            #if canImport(UIKit)
+            .onReceive(NotificationCenter.default.publisher(for: .amgiDeviceDidShake)) { _ in
+                perform(.shake)
+            }
+            #endif
             .navigationBarTitleDisplayMode(.inline)
             #if canImport(UIKit)
             .toolbar {

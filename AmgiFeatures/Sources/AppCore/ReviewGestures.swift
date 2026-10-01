@@ -6,14 +6,15 @@
 public import AnkiKit
 public import Foundation
 
-/// A touch on the card while reviewing: a tap in one of nine areas, or a
-/// swipe. What each one does is the user's choice
-/// (Settings → Review Behavior → Taps & Swipes).
+/// Something done to the card or the phone while reviewing: a tap in one of
+/// nine areas, a swipe, or a shake. What each one does is the user's choice
+/// (Settings → Review Behavior → Taps, Swipes & Shake).
 public enum ReviewGesture: String, CaseIterable, Identifiable, Sendable {
     case tapTopLeft, tapTopCenter, tapTopRight
     case tapMiddleLeft, tapCenter, tapMiddleRight
     case tapBottomLeft, tapBottomCenter, tapBottomRight
     case swipeLeft, swipeRight, swipeUp, swipeDown
+    case shake
 
     public var id: String { rawValue }
 
@@ -52,11 +53,13 @@ public enum ReviewGesture: String, CaseIterable, Identifiable, Sendable {
         case .swipeRight: "Swipe right"
         case .swipeUp: "Swipe up"
         case .swipeDown: "Swipe down"
+        case .shake: "Shake"
         }
     }
 
     /// Enough to review without the buttons, but nothing on the edges or
-    /// corners, where a thumb resting on the screen is most likely to land.
+    /// corners, where a thumb resting on the screen is most likely to land,
+    /// and nothing on a shake, which a bus ride can set off.
     public var defaultAction: ReviewGestureAction {
         switch self {
         case .tapCenter: .good

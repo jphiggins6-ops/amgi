@@ -8,9 +8,9 @@ import AppCore
 import Theme
 import UI
 
-/// Chooses what each tap area and swipe does while reviewing. The tap areas
-/// are drawn as a card split three by three, so an area is picked where it
-/// sits rather than by name.
+/// Chooses what each tap area, swipe, and a shake do while reviewing. The
+/// tap areas are drawn as a card split three by three, so an area is picked
+/// where it sits rather than by name.
 struct TapsAndSwipesSettingsView: View {
     @Environment(\.palette) private var palette
     @State private var actions: [ReviewGesture: ReviewGestureAction] = TapsAndSwipesSettingsView.stored()
@@ -40,10 +40,23 @@ struct TapsAndSwipesSettingsView: View {
             }
             SettingsFootnote("A swipe that scrolls a long card counts as scrolling, not as a swipe.")
 
+            SettingsSectionHeader(title: "Shake")
+            SettingsGroup {
+                SettingsPickerRow(
+                    title: ReviewGesture.shake.title,
+                    systemImage: "iphone.radiowaves.left.and.right",
+                    tone: .accent,
+                    selection: binding(for: .shake)
+                ) {
+                    actionOptions
+                }
+            }
+            SettingsFootnote("Give the phone a quick shake while reviewing. Not while typing an answer: there a shake is the keyboard's undo.")
+
             SettingsSectionHeader(title: "Defaults")
             SettingsGroup {
                 SettingsButtonRow(
-                    title: "Reset Taps & Swipes",
+                    title: "Reset Taps, Swipes & Shake",
                     systemImage: "arrow.counterclockwise",
                     tone: .neutral
                 ) {
@@ -52,9 +65,9 @@ struct TapsAndSwipesSettingsView: View {
                     }
                 }
             }
-            SettingsFootnote("Center: Good. Middle left: Again. Swipe left: Again. Swipe right: Good. Everything else: Nothing.")
+            SettingsFootnote("Center: Good. Middle left: Again. Swipe left: Again. Swipe right: Good. Everything else, shake included: Nothing.")
         }
-        .navigationTitle("Taps & Swipes")
+        .navigationTitle("Taps, Swipes & Shake")
         .navigationBarTitleDisplayMode(.inline)
     }
 
