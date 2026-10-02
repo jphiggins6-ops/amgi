@@ -39,6 +39,9 @@ struct ReviewContent: View {
     /// The estimated time left under the progress bar. A binding so the ⋯
     /// menu can switch it off right there.
     @Binding var showTimeLeft: Bool
+    /// Set for the Library's study buttons, whose sessions end in a short
+    /// celebration and a return to the Library.
+    var round: StudyRound? = nil
     let onDismiss: () -> Void
 
     @Environment(\.palette) private var palette
@@ -76,7 +79,11 @@ struct ReviewContent: View {
                 if let startError = session.startError {
                     ReviewStartFailureView(message: startError) { session.start() }
                 } else if session.isFinished {
-                    ReviewFinishedView(session: session, onDone: onDismiss)
+                    if let round {
+                        RoundFinishedView(round: round, onDone: onDismiss)
+                    } else {
+                        ReviewFinishedView(session: session, onDone: onDismiss)
+                    }
                 } else {
                     ReviewCardArea(
                         session: session,
@@ -590,6 +597,56 @@ private struct ReviewFinishedView: View {
     }
 }
 
+/// The end of a Library round: "Done for today" (or how far the day has
+/// got) for a couple of seconds, then back to the Library on its own. A
+/// tap anywhere goes back at once.
+private struct RoundFinishedView: View {
+    let round: StudyRound
+    let onDone: () -> Void
+
+    @Environment(\.palette) private var palette
+    @ScaledMetric(relativeTo: .largeTitle) private var glyphSize: CGFloat = 76
+    @State private var shown = false
+
+    var body: some View {
+        VStack(spacing: AmgiSpacing.lg) {
+            Spacer()
+            Image(systemName: round.finishSymbol)
+                .font(.system(size: glyphSize))
+                .foregroundStyle(palette.positive)
+                .scaleEffect(shown ? 1 : 0.6)
+                .opacity(shown ? 1 : 0)
+                .accessibilityHidden(true)
+            Text(verbatim: round.finishTitle)
+                .amgiFont(.sectionHeading)
+                .foregroundStyle(palette.textPrimary)
+            Text(verbatim: round.finishMessage)
+                .amgiFont(.body)
+                .foregroundStyle(palette.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, AmgiSpacing.lg)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onDone)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint("Goes back to the Library")
+        .accessibilityAction { onDone() }
+        .task {
+            withAnimation(AmgiMotion.momentum) { shown = true }
+            // Cancelled if the screen closes first, and then hands nothing back.
+            do {
+                try await Task.sleep(for: .seconds(2))
+            } catch {
+                return
+            }
+            onDone()
+        }
+    }
+}
+
 // MARK: - Previews
 
 #if DEBUG
@@ -619,6 +676,22 @@ private struct ReviewFinishedView: View {
         showNextReviewTime: true,
         destination: .constant(nil),
         showTimeLeft: .constant(true),
+        onDismiss: {}
+    )
+}
+
+#Preview("Done for today") {
+    ReviewContent(
+        session: .preview(isFinished: true),
+        showRemainingDays: true,
+        autoMatchCardBackground: false,
+        openLinksExternally: true,
+        cardContentAlignment: CardWebViewContentAlignment.center.rawValue,
+        tapLookup: true,
+        showNextReviewTime: true,
+        destination: .constant(nil),
+        showTimeLeft: .constant(true),
+        round: StudyRound(kind: .reviews, doneEarlierToday: 120, finishesTheDay: true),
         onDismiss: {}
     )
 }

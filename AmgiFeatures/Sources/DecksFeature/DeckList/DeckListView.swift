@@ -23,12 +23,14 @@ package struct DeckListView: View {
     private let onImport: () -> Void
     private let onOpenSettings: () -> Void
     @Dependency(\.collectionStore) private var store
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var wentToBackground = false
     @State private var model: DeckListModel
     @State private var showCreateSheet = false
     @State private var showBrowse = false
     @State private var showFilteredDecks = false
     @State private var showMnemonics = false
-    @State private var studyNowDeckId: DeckID?
+    @State private var studyNow: DeckListModel.StudyNowLaunch?
     @State private var isBuildingStudyNow = false
     @State private var studyNowError: String?
     /// Emptying Study Now after a session; a new session waits for it, or
@@ -97,10 +99,10 @@ package struct DeckListView: View {
             MnemonicInboxView()
         }
         .toolbar { toolbarContent }
-        .fullScreenCover(item: $studyNowDeckId) { deckId in
-            ReviewView(deckId: deckId, countsNewCardsAgainstHomeDecks: true) {
-                studyNowDeckId = nil
-                finishingStudyNow = Task { await model.finishStudyNow(deckId) }
+        .fullScreenCover(item: $studyNow) { launch in
+            ReviewView(deckId: launch.deckId, countsNewCardsAgainstHomeDecks: true, round: launch.round) {
+                studyNow = nil
+                finishingStudyNow = Task { await model.finishStudyNow(launch.deckId) }
             }
         }
         .alert(
@@ -123,6 +125,19 @@ package struct DeckListView: View {
             }
         }
         .task(id: store.generation) { await model.load() }
+        .onChange(of: scenePhase) { _, phase in
+            // Back from the background, a new Anki day may have begun:
+            // today's counts, and "done for today", start over.
+            switch phase {
+            case .background:
+                wentToBackground = true
+            case .active where wentToBackground:
+                wentToBackground = false
+                Task { await model.load() }
+            default:
+                break
+            }
+        }
     }
 
     @ToolbarContentBuilder
@@ -174,13 +189,13 @@ package struct DeckListView: View {
         }
     }
 
-    private func startStudyNow(_ kind: DeckListModel.StudyNowKind) async {
+    private func startStudyNow(_ button: DeckListModel.StudyButton) async {
         guard !isBuildingStudyNow else { return }
         isBuildingStudyNow = true
         defer { isBuildingStudyNow = false }
         await finishingStudyNow?.value
         do {
-            studyNowDeckId = try await model.buildStudyNowDeck(kind)
+            studyNow = try await model.prepareStudyNow(button)
         } catch {
             // Nothing left to gather: the engine refuses to build a filtered
             // deck from an empty search, and New throws before asking it.

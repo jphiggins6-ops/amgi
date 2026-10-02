@@ -8,6 +8,7 @@ import Testing
 import AnkiKit
 import AnkiClients
 import Dependencies
+import ReviewFeature
 @testable import DecksFeature
 
 @MainActor
@@ -15,7 +16,7 @@ import Dependencies
 
     // MARK: - Reviews
 
-    @Test func reviewsGatherEveryDueUnflaggedCardOutsidePInRandomOrder() async throws {
+    @Test func reviewsGatherEveryDueUnflaggedCardOutsidePNotYetAnsweredTodayInRandomOrder() async throws {
         let specs = Recorder<FilteredDeckSpec>()
         var deckClient = DeckClient()
         deckClient.fetchTree = { [] }
@@ -35,9 +36,29 @@ import Dependencies
         #expect(spec.id == DeckID(0), "no Study Now deck yet, so one is created")
         #expect(spec.name == "Study Now")
         #expect(spec.searchTerms == [
-            FilteredDeckSearchTerm(search: "is:due flag:0 -deck:p", limit: 9999, order: .random)
+            FilteredDeckSearchTerm(search: "is:due flag:0 -deck:p -rated:1", limit: 9999, order: .random)
         ])
         #expect(spec.reschedule, "answers must count as they would in the card's home deck")
+    }
+
+    @Test func theAgainRoundGathersCardsAnsweredTodayThatAreDueAgain() async throws {
+        let specs = Recorder<FilteredDeckSpec>()
+        var deckClient = DeckClient()
+        deckClient.fetchTree = { [] }
+        deckClient.createFilteredDeck = { spec in
+            specs.record(spec)
+            return DeckCreation(id: DeckID(77), changes: CollectionChanges(deck: true))
+        }
+
+        _ = try await withDependencies {
+            $0.deckClient = deckClient
+        } operation: {
+            try await DeckListModel().buildStudyNowDeck(.again)
+        }
+
+        #expect(specs.all.first?.searchTerms == [
+            FilteredDeckSearchTerm(search: "rated:1 is:due flag:0 -deck:p", limit: 9999, order: .random)
+        ])
     }
 
     @Test func reviewsRebuildTheExistingStudyNowDeckInPlace() async throws {
@@ -120,6 +141,142 @@ import Dependencies
                 try await DeckListModel().buildStudyNowDeck(.newCards)
             }
         }
+    }
+
+    // MARK: - Today's rounds
+
+    /// 300 due this morning: 120 answered so far (a few already due
+    /// again), 180 left. 20 new: 12 learned, 8 left.
+    static var searches: [String: Int] {
+        [
+            DeckListModel.gatherable(DeckListModel.reviewsRoundSearch): 180,
+            DeckListModel.reviewsDoneTodaySearch: 120,
+            DeckListModel.newCardsLearnedTodaySearch: 12,
+            DeckListModel.gatherable(DeckListModel.dueAgainSearch): 7,
+        ]
+    }
+
+    /// A search stub answering with as many cards as `counts` gives the
+    /// query. `nonisolated`, like the fixtures below: the stub runs off the
+    /// main actor.
+    nonisolated static func searching(_ counts: [String: Int]) -> @Sendable (String) async throws -> [CardID] {
+        { query in (0..<(counts[query] ?? 0)).map { CardID(Int64($0)) } }
+    }
+
+    @Test func todaysTotalsAreWhatsDonePlusWhatsLeft() async {
+        var deckClient = DeckClient()
+        deckClient.fetchTree = { [] }
+        var cardClient = CardClient()
+        cardClient.search = Self.searching(Self.searches)
+
+        let today = await withDependencies {
+            $0.deckClient = deckClient
+            $0.cardClient = cardClient
+        } operation: {
+            await DeckListModel().todayProgress(tree: [Self.deck(1, "Korean", new: 8, review: 3), Self.deck(2, "p", new: 5)])
+        }
+
+        #expect(today == DeckListModel.TodayProgress(
+            reviewsLeft: 180, reviewsDone: 120, newLeft: 8, newDone: 12, dueAgain: 7
+        ))
+    }
+
+    @Test func reviewsOpensTodaysFirstLookWhileAnyCardsAreLeft() async throws {
+        let specs = Recorder<FilteredDeckSpec>()
+        var deckClient = DeckClient()
+        deckClient.fetchTree = { [Self.deck(1, "Korean", new: 8)] }
+        deckClient.createFilteredDeck = { spec in
+            specs.record(spec)
+            return DeckCreation(id: DeckID(77), changes: CollectionChanges(deck: true))
+        }
+        var cardClient = CardClient()
+        cardClient.search = Self.searching(Self.searches)
+
+        let launch = try await withDependencies {
+            $0.deckClient = deckClient
+            $0.cardClient = cardClient
+        } operation: {
+            try await DeckListModel().prepareStudyNow(.reviews)
+        }
+
+        #expect(launch.deckId == DeckID(77))
+        #expect(launch.round == StudyRound(kind: .reviews, doneEarlierToday: 120, finishesTheDay: false))
+        #expect(specs.all.first?.searchTerms.first?.search == DeckListModel.reviewsRoundSearch)
+    }
+
+    @Test func finishingReviewsFinishesTheDayOnceNewCardsAreDone() async throws {
+        var deckClient = DeckClient()
+        deckClient.fetchTree = { [Self.deck(1, "Korean", review: 3)] }
+        deckClient.createFilteredDeck = { _ in DeckCreation(id: DeckID(77), changes: CollectionChanges(deck: true)) }
+        var cardClient = CardClient()
+        cardClient.search = Self.searching(Self.searches)
+
+        let launch = try await withDependencies {
+            $0.deckClient = deckClient
+            $0.cardClient = cardClient
+        } operation: {
+            try await DeckListModel().prepareStudyNow(.reviews)
+        }
+
+        #expect(launch.round.finishesTheDay, "no new cards left today")
+    }
+
+    @Test func onceEveryDueCardHasBeenSeenReviewsOffersTheOnesDueAgain() async throws {
+        let specs = Recorder<FilteredDeckSpec>()
+        var deckClient = DeckClient()
+        deckClient.fetchTree = { [] }
+        deckClient.createFilteredDeck = { spec in
+            specs.record(spec)
+            return DeckCreation(id: DeckID(77), changes: CollectionChanges(deck: true))
+        }
+        var counts = Self.searches
+        counts[DeckListModel.gatherable(DeckListModel.reviewsRoundSearch)] = 0
+        var cardClient = CardClient()
+        cardClient.search = Self.searching(counts)
+
+        let launch = try await withDependencies {
+            $0.deckClient = deckClient
+            $0.cardClient = cardClient
+        } operation: {
+            try await DeckListModel().prepareStudyNow(.reviews)
+        }
+
+        #expect(launch.round == StudyRound(kind: .again))
+        #expect(specs.all.first?.searchTerms.first?.search == DeckListModel.dueAgainSearch)
+    }
+
+    @Test func withNothingLeftAndNothingDueAgainReviewsHasNothingToOpen() async {
+        var deckClient = DeckClient()
+        deckClient.fetchTree = { [] }
+        var cardClient = CardClient()
+        cardClient.search = Self.searching([:])
+
+        await #expect(throws: DeckListModel.StudyNowError.nothingDue) {
+            try await withDependencies {
+                $0.deckClient = deckClient
+                $0.cardClient = cardClient
+            } operation: {
+                try await DeckListModel().prepareStudyNow(.reviews)
+            }
+        }
+    }
+
+    @Test func newOpensTodaysNewCardsCountedAgainstThoseAlreadyLearned() async throws {
+        var deckClient = DeckClient()
+        deckClient.fetchTree = { [Self.deck(1, "Korean", new: 2)] }
+        deckClient.createFilteredDeck = { _ in DeckCreation(id: DeckID(77), changes: CollectionChanges(deck: true)) }
+        var cardClient = CardClient()
+        cardClient.search = Self.searching(Self.searches)
+        cardClient.fetchQueue = { _, _ in [Self.card(11, queue: 0), Self.card(13, queue: 0)] }
+
+        let launch = try await withDependencies {
+            $0.deckClient = deckClient
+            $0.cardClient = cardClient
+        } operation: {
+            try await DeckListModel().prepareStudyNow(.newCards)
+        }
+
+        #expect(launch.round == StudyRound(kind: .newCards, doneEarlierToday: 12, finishesTheDay: false))
     }
 
     @Test func theNewCountSumsTopLevelDecksOutsidePAndFilteredDecks() {

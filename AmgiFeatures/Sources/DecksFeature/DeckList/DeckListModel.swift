@@ -13,6 +13,7 @@ import AnkiClients
 import AnkiKit
 import Dependencies
 import Foundation
+import ReviewFeature
 
 /// Data state + load/mutation logic for the Library screen. Mirrors
 /// `DeckDetailModel`: the View owns navigation, sheets, and the toolbar,
@@ -62,27 +63,26 @@ final class DeckListModel {
             }
             let rows = tree.map(DeckListRow.init(node:))
             let viewRows = rows.map(\.viewData)
-            // The two study buttons' counts: what each would gather now.
-            let reviewCount = (try? await cardClient.search(Self.reviewsDueSearch).count) ?? 0
-            let newCount = Self.newCardsToday(in: tree)
-
-            state = .loaded(
-                rows: viewRows,
-                hero: HeroData(
-                    reviewCount: reviewCount,
-                    newCount: newCount,
-                    streak: carried?.hero.streak ?? 0,
-                    last14Days: carried?.hero.last14Days ?? Array(repeating: 0, count: 14)
-                ),
-                heatmap: carried?.heatmap
+            // The two study buttons: what's left of today, and of how many.
+            let today = await todayProgress(tree: tree)
+            let counts = HeroData(
+                reviewCount: today.reviewsLeft,
+                newCount: today.newLeft,
+                reviewTotal: today.reviewsLeft + today.reviewsDone,
+                newTotal: today.newLeft + today.newDone,
+                againCount: today.dueAgain,
+                streak: carried?.hero.streak ?? 0,
+                last14Days: carried?.hero.last14Days ?? Array(repeating: 0, count: 14)
             )
+
+            state = .loaded(rows: viewRows, hero: counts, heatmap: carried?.heatmap)
 
             // Nested inside DeckListLoad on purpose: phase one (the deck
             // tree) and phase two (a 365-day revlog scan) have very
             // different costs, and a single interval hides which one the
             // launch path is actually waiting on.
             let (hero, heatmap) = await AppSignpost.measure("DeckListActivity") {
-                await buildHeroAndHeatmap(reviewCount: reviewCount, newCount: newCount)
+                await buildHeroAndHeatmap(counts: counts)
             }
             guard !Task.isCancelled else { return }
             state = .loaded(rows: viewRows, hero: hero, heatmap: heatmap)
@@ -104,13 +104,97 @@ final class DeckListModel {
         }
     }
 
-    /// What the Library's two study buttons gather.
+    /// What the Library's two study buttons gather. Each is a round that
+    /// shows every card in it once (`StudyRound`); today's minimum is the
+    /// first two.
     enum StudyNowKind: Sendable {
-        /// Every card that is due, has no flag, and isn't in deck "p".
+        /// Every card that is due, has no flag, isn't in deck "p", and
+        /// hasn't been answered yet today.
         case reviews
         /// Today's new cards from every deck but "p", within each deck's
         /// daily new-card limit.
         case newCards
+        /// Cards answered today that are due again: the Reviews button's
+        /// round once every due card has had its turn.
+        case again
+    }
+
+    /// Where today stands. Every number comes from the collection, so it
+    /// survives leaving a round half done, a restart, or study on another
+    /// device, and resets with Anki's day.
+    struct TodayProgress: Equatable, Sendable {
+        /// Due cards not yet answered today.
+        var reviewsLeft = 0
+        /// Cards answered today that weren't new: today's reviews done.
+        /// Answered cards stay counted however soon they're due again, so
+        /// done plus left is fixed for the day.
+        var reviewsDone = 0
+        /// New cards left today, within each deck's limit.
+        var newLeft = 0
+        /// New cards learned today.
+        var newDone = 0
+        /// Cards answered today that are due again.
+        var dueAgain = 0
+    }
+
+    func todayProgress(tree: [DeckTreeNode]) async -> TodayProgress {
+        let reviewsLeft = await count(Self.gatherable(Self.reviewsRoundSearch))
+        let reviewsDone = await count(Self.reviewsDoneTodaySearch)
+        let newDone = await count(Self.newCardsLearnedTodaySearch)
+        let dueAgain = await count(Self.gatherable(Self.dueAgainSearch))
+        return TodayProgress(
+            reviewsLeft: reviewsLeft,
+            reviewsDone: reviewsDone,
+            newLeft: Self.newCardsToday(in: tree),
+            newDone: newDone,
+            dueAgain: dueAgain
+        )
+    }
+
+    private func count(_ search: String) async -> Int {
+        (try? await cardClient.search(search).count) ?? 0
+    }
+
+    /// A study button's session: the Study Now deck it built and the round
+    /// the deck holds.
+    struct StudyNowLaunch: Identifiable, Equatable {
+        let deckId: DeckID
+        let round: StudyRound
+
+        var id: Int64 { deckId.rawValue }
+    }
+
+    enum StudyButton: Sendable {
+        case reviews
+        case newCards
+    }
+
+    /// Builds the round a study button opens. Reviews opens today's first
+    /// look at every due card while any are left, and after that another
+    /// look at the cards due again.
+    func prepareStudyNow(_ button: StudyButton) async throws -> StudyNowLaunch {
+        let tree = (try? await deckClient.fetchTree()) ?? []
+        let today = await todayProgress(tree: tree)
+        switch button {
+        case .reviews where today.reviewsLeft > 0:
+            let deckId = try await buildStudyNowDeck(.reviews)
+            return StudyNowLaunch(deckId: deckId, round: StudyRound(
+                kind: .reviews,
+                doneEarlierToday: today.reviewsDone,
+                finishesTheDay: today.newLeft == 0
+            ))
+        case .reviews:
+            guard today.dueAgain > 0 else { throw StudyNowError.nothingDue }
+            let deckId = try await buildStudyNowDeck(.again)
+            return StudyNowLaunch(deckId: deckId, round: StudyRound(kind: .again))
+        case .newCards:
+            let deckId = try await buildStudyNowDeck(.newCards)
+            return StudyNowLaunch(deckId: deckId, round: StudyRound(
+                kind: .newCards,
+                doneEarlierToday: today.newDone,
+                finishesTheDay: today.reviewsLeft == 0
+            ))
+        }
     }
 
     /// Both study buttons build this one filtered deck, rebuilt in place on
@@ -127,16 +211,32 @@ final class DeckListModel {
     /// the card's home deck — the engine schedules with the home deck's
     /// preset (FSRS parameters, steps, retention).
     static let studyNowDeckName = "Study Now"
-    static let studyNowSearch = "is:due flag:0 -deck:p"
-    /// Counts the cards `studyNowSearch` would gather right now. Gathering
-    /// skips cards held by other filtered decks, but only after returning
-    /// Study Now's own cards home, so those still count.
-    static let reviewsDueSearch = "is:due flag:0 -deck:p (-deck:filtered OR \"deck:Study Now\")"
+    /// Today's first look: due, unflagged, outside "p", not yet answered
+    /// today. A card missed today waits for the `again` round, however
+    /// soon it's due, which is also why the count of what's left never
+    /// grows back.
+    static let reviewsRoundSearch = "is:due flag:0 -deck:p -rated:1"
+    /// Cards answered today that are due again.
+    static let dueAgainSearch = "rated:1 is:due flag:0 -deck:p"
+    /// Today's reviews done: answered today and not new this morning,
+    /// whatever their flag now.
+    static let reviewsDoneTodaySearch = "rated:1 -introduced:1 -deck:p"
+    /// Today's new cards done: first answered today.
+    static let newCardsLearnedTodaySearch = "introduced:1 -deck:p"
+
+    /// Counts what `search` would gather right now. Gathering skips cards
+    /// held by other filtered decks, but only after returning Study Now's
+    /// own cards home, so those still count.
+    static func gatherable(_ search: String) -> String {
+        "\(search) (-deck:filtered OR \"deck:\(studyNowDeckName)\")"
+    }
 
     func buildStudyNowDeck(_ kind: StudyNowKind) async throws -> DeckID {
         switch kind {
         case .reviews:
-            return try await buildReviewsDeck()
+            return try await buildGatheredDeck(Self.reviewsRoundSearch)
+        case .again:
+            return try await buildGatheredDeck(Self.dueAgainSearch)
         case .newCards:
             return try await buildNewCardsDeck()
         }
@@ -154,7 +254,7 @@ final class DeckListModel {
         store.invalidateAll()
     }
 
-    private func buildReviewsDeck() async throws -> DeckID {
+    private func buildGatheredDeck(_ search: String) async throws -> DeckID {
         let tree = (try? await deckClient.fetchTree()) ?? []
         let existing = FilteredDeckPresetsModel.filteredDecksByName(tree)[Self.studyNowDeckName]
         let spec = FilteredDeckSpec(
@@ -163,7 +263,7 @@ final class DeckListModel {
             searchTerms: [
                 // The limit is above any real due count, so the random order
                 // never decides which cards are left out.
-                FilteredDeckSearchTerm(search: Self.studyNowSearch, limit: 9999, order: .random)
+                FilteredDeckSearchTerm(search: search, limit: 9999, order: .random)
             ],
             reschedule: true
         )
@@ -231,10 +331,12 @@ final class DeckListModel {
 
     enum StudyNowError: LocalizedError, Equatable {
         case noNewCards
+        case nothingDue
 
         var errorDescription: String? {
             switch self {
             case .noNewCards: "There are no new cards left for today."
+            case .nothingDue: "Every card due today has had its turn. Cards you've seen come back here as they fall due again."
             }
         }
     }
@@ -256,25 +358,18 @@ final class DeckListModel {
 }
 
 private extension DeckListModel {
-    func buildHeroAndHeatmap(reviewCount: Int, newCount: Int) async -> (HeroData, HeatmapCardData) {
+    func buildHeroAndHeatmap(counts: HeroData) async -> (HeroData, HeatmapCardData) {
         // Window the streak over the same range we fetch, or the default
         // 28 silently caps a year's worth of data at 28 days.
         let graphDays = 365
         guard let graphs = try? await statsClient.fetchGraphs("", graphDays) else {
             return (
-                HeroData(
-                    reviewCount: reviewCount,
-                    newCount: newCount,
-                    streak: 0,
-                    last14Days: Array(repeating: 0, count: 14)
-                ),
+                counts.withActivity(streak: 0, last14Days: Array(repeating: 0, count: 14)),
                 HeatmapCardData.empty
             )
         }
         let reviewCounts = graphs.reviews.count
-        let hero = HeroData(
-            reviewCount: reviewCount,
-            newCount: newCount,
+        let hero = counts.withActivity(
             streak: StreakCalculator.streak(reviews: reviewCounts, window: graphDays),
             last14Days: StreakCalculator.lastNDaysTotals(reviews: reviewCounts, days: 14)
         )

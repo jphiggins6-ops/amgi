@@ -592,6 +592,80 @@ import AnkiServices
         }
     }
 
+    @Test func aCardAlreadySeenIsLeftOutAltogether() {
+        let engineOrder = [Self.card(1, queue: 1), Self.card(2, queue: 2), Self.card(3, queue: 1)]
+        let arranged = ReviewQueueOrder.arranged(engineOrder, defersRepeats: false, skipping: [CardID(1)])
+        #expect(arranged.map(\.card.id.rawValue) == [2, 3])
+    }
+
+    // MARK: - Each card once (the Library's rounds)
+
+    /// Card 1 is missed and comes due again straight away; in a round that
+    /// shows each card once it isn't shown again, the count stays at the
+    /// day's total, and the round ends after card 2. Undo makes card 2
+    /// unseen again.
+    @Test func aRoundShowsEachCardOnceAgainstAFixedTotal() async throws {
+        let first = Self.card(1, queue: 2)
+        let second = Self.card(2, queue: 2)
+        let firstMissed = Self.card(1, queue: 1)
+
+        final class Engine: @unchecked Sendable {
+            private let lock = NSLock()
+            private var answered = 0
+            var answeredCount: Int { lock.lock(); defer { lock.unlock() }; return answered }
+            func step(_ delta: Int) { lock.lock(); answered += delta; lock.unlock() }
+        }
+        let engine = Engine()
+
+        try await withDependencies {
+            $0.decksService.setCurrentDeck = { _ in }
+            $0.schedulerService.getQueuedCards = { _ in
+                switch engine.answeredCount {
+                case 0:
+                    QueuedCardsResult(cards: [first, second], newCount: 0, learningCount: 0, reviewCount: 2)
+                case 1:
+                    // The missed card is due again at once, ahead of card 2.
+                    QueuedCardsResult(cards: [firstMissed, second], newCount: 0, learningCount: 1, reviewCount: 1)
+                default:
+                    QueuedCardsResult(cards: [firstMissed], newCount: 0, learningCount: 1, reviewCount: 0)
+                }
+            }
+            $0.schedulerService.answerReviewCard = { _, _, _, _ in engine.step(1) }
+            $0.collectionService.undoLast = { engine.step(-1) }
+            $0.notesService.getNote = { id in
+                NoteRecord(id: id, guid: "g", mid: NotetypeID(200), mod: 0, flds: "", sfld: "", csum: 0)
+            }
+            $0.cardRenderingService.renderCard = { _ in
+                RenderedCard(frontHTML: "f", backHTML: "b", cardCSS: "")
+            }
+        } operation: {
+            let s = ReviewSession(deckId: DeckID(1))
+            s.defersRepeats = false
+            s.showsEachCardOnce = true
+            s.cardsDoneBefore = 10
+            s.start()
+            try await pollUntil { s.currentCardId == first.card.id && !s.isAdvancing }
+            #expect(s.sessionTotal == 12, "10 done earlier today and 2 in the deck")
+            #expect(s.cardPosition == 11)
+
+            s.answer(rating: .again)
+            try await pollUntil { s.currentCardId == second.card.id && !s.isAdvancing }
+            #expect(s.currentCardId == second.card.id, "the missed card waits for another round")
+            #expect(s.sessionTotal == 12, "the total doesn't grow when the missed card comes due")
+            #expect(s.cardPosition == 12)
+
+            s.answer(rating: .good)
+            try await pollUntil { s.isFinished && !s.isAdvancing }
+            #expect(s.isFinished, "every card has had its turn, though the missed one is due")
+            #expect(s.progressFraction == 1)
+
+            s.undo()
+            try await pollUntil { s.currentCardId == second.card.id && !s.isAdvancing }
+            #expect(!s.isFinished)
+            #expect(s.cardPosition == 12)
+        }
+    }
+
     // MARK: - New cards learned in a filtered deck
 
     /// The engine credits an answer to the filtered deck the card sits in,
@@ -703,6 +777,13 @@ import AnkiServices
         let away = try #require(Self.pace(answersOf: [600, 600, 600]).secondsLeft(for: counts))
         let slow = try #require(Self.pace(answersOf: [60, 60, 60]).secondsLeft(for: counts))
         #expect(away == slow)
+    }
+
+    @Test func aRoundKnowsExactlyHowManyAnswersAreLeft() throws {
+        let pace = Self.pace(answersOf: [8, 10, 12])
+        let left = try #require(pace.secondsLeft(forAnswers: 30))
+        #expect(abs(left - 300) < 0.001, "30 cards at 10 seconds each, no repeats to allow for")
+        #expect(Self.pace(answersOf: [10, 10]).secondsLeft(forAnswers: 30) == nil)
     }
 
     @Test func anUndoneAnswerNoLongerCounts() {

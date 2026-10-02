@@ -48,13 +48,25 @@ public struct ReviewPace: Equatable, Sendable {
     /// say little about that rate, so it starts out leaning on one miss in
     /// ten.
     public func secondsLeft(for counts: DeckCounts) -> Double? {
-        guard answers.count >= Self.answersBeforeEstimating else { return nil }
+        guard let averageSeconds else { return nil }
         let count = Double(answers.count)
-        let averageSeconds = Double(answers.reduce(0) { $0 + $1.milliseconds }) / count / 1000
         let misses = Double(answers.filter(\.missed).count)
         let missRate = min((misses + 0.5) / (count + 5), 0.5)
         let answersLeft = Double(max(counts.total + counts.newCount, 0)) / (1 - missRate)
         return answersLeft * averageSeconds
+    }
+
+    /// Roughly how many seconds `answersLeft` more answers will take at
+    /// this pace, for a session that shows each card once and so knows
+    /// exactly how many are left.
+    public func secondsLeft(forAnswers answersLeft: Int) -> Double? {
+        guard let averageSeconds else { return nil }
+        return Double(max(answersLeft, 0)) * averageSeconds
+    }
+
+    private var averageSeconds: Double? {
+        guard answers.count >= Self.answersBeforeEstimating else { return nil }
+        return Double(answers.reduce(0) { $0 + $1.milliseconds }) / Double(answers.count) / 1000
     }
 
     /// What the review screen shows, e.g. "About 12 min left · done around

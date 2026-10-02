@@ -78,6 +78,24 @@ public final class ReviewSession {
     /// never uses up any limit and today's new cards never run out.
     @ObservationIgnored public var countsNewCardsAgainstHomeDecks = false
     @ObservationIgnored private var newCardsStudied: [DeckID: Int32] = [:]
+    /// Shows each card once. A card answered in this session isn't shown
+    /// again however soon it falls due, and the session ends once every
+    /// card in its deck has had a turn. Progress then counts cards rather
+    /// than answers, against `cardsDoneBefore` plus the deck as it opened,
+    /// so the total stays put when a missed card comes due again. For the
+    /// Library's study buttons, whose decks hold today's cards. Set before
+    /// `start()`.
+    @ObservationIgnored public var showsEachCardOnce = false
+    /// With `showsEachCardOnce`: how many of the day's cards were done
+    /// before this session, so its progress reads against the whole day.
+    @ObservationIgnored public var cardsDoneBefore = 0
+    /// With `showsEachCardOnce`: the cards answered so far, which the queue
+    /// skips.
+    @ObservationIgnored private var seenThisSession: Set<CardID> = []
+    /// The card the last answer went to, so an undo can make it unseen.
+    @ObservationIgnored private var lastAnsweredCard: CardID?
+    /// How many cards the engine counted in the deck as the session began.
+    private var cardsAtStart = 0
     /// The home deck the last answer was tallied under, so an undo can take
     /// it back off.
     @ObservationIgnored private var lastTalliedHomeDeck: DeckID?
@@ -124,22 +142,41 @@ public final class ReviewSession {
 
     // MARK: - Session progress
 
+    /// With `showsEachCardOnce`, the day's cards: those done before this
+    /// session plus the deck as it opened. Otherwise the answers given plus
+    /// the engine's count of what's left, which grows as cards come back.
     public var sessionTotal: Int {
-        sessionStats.reviewed + remainingCounts.total
+        showsEachCardOnce
+            ? cardsDoneBefore + cardsAtStart
+            : sessionStats.reviewed + remainingCounts.total
+    }
+
+    /// In a session that shows each card once, every answer is a different
+    /// card, so answers given count cards done.
+    private var cardsDone: Int {
+        (showsEachCardOnce ? cardsDoneBefore : 0) + sessionStats.reviewed
     }
 
     public var cardPosition: Int {
-        min(sessionStats.reviewed + 1, max(sessionTotal, 1))
+        min(cardsDone + 1, max(sessionTotal, 1))
     }
 
     public var progressFraction: Double {
-        sessionTotal > 0 ? Double(sessionStats.reviewed) / Double(sessionTotal) : 0
+        sessionTotal > 0 ? Double(cardsDone) / Double(sessionTotal) : 0
     }
 
     /// Roughly how long the cards still to come will take at this session's
     /// pace, or nil until a few answers have set one. See `ReviewPace`.
     public var estimatedSecondsLeft: Double? {
-        isFinished ? nil : pace.secondsLeft(for: remainingCounts)
+        guard !isFinished else { return nil }
+        guard showsEachCardOnce else { return pace.secondsLeft(for: remainingCounts) }
+        return pace.secondsLeft(forAnswers: cardsAtStart - sessionStats.reviewed)
+    }
+
+    /// Enough to reach every unseen card: seen cards sit in the engine's
+    /// list as learning cards, possibly ahead of them.
+    private var queueFetchLimit: Int32 {
+        Int32(clamping: 200 + seenThisSession.count + 1)
     }
 
     /// False while a card is changing and for a moment after it turns
@@ -179,15 +216,17 @@ public final class ReviewSession {
         let notetypesClient = self.notetypesClient
         let cardRendering = self.cardRendering
         let deckId = self.deckId
+        let fetchLimit = queueFetchLimit
         Task {
             defer { isAdvancing = false }
             do {
                 let (queue, name) = try await Task.detached { () -> (QueuedCardsResult, String) in
                     try decks.setCurrentDeck(deckId)
                     let name = (try? decks.getCurrentDeck().name) ?? ""
-                    return (try scheduler.getQueuedCards(200), name)
+                    return (try scheduler.getQueuedCards(fetchLimit), name)
                 }.value
-                cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats)
+                cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats, skipping: seenThisSession)
+                cardsAtStart = queue.newCount + queue.learningCount + queue.reviewCount
                 deckName = name
                 remainingCounts = DeckCounts(
                     newCount: queue.newCount,
@@ -263,6 +302,7 @@ public final class ReviewSession {
         let notetypes = self.notetypes
         let notetypesClient = self.notetypesClient
         let cardRendering = self.cardRendering
+        let fetchLimit = queueFetchLimit
 
         answerTapCount += 1
         tappedRating = rating
@@ -276,7 +316,7 @@ public final class ReviewSession {
                 do {
                     let queue = try await Task.detached {
                         try scheduler.answerReviewCard(cardId, rating, timeSpent, states)
-                        return try scheduler.getQueuedCards(200)
+                        return try scheduler.getQueuedCards(fetchLimit)
                     }.value
 
                     answerError = nil
@@ -290,8 +330,10 @@ public final class ReviewSession {
                         newCardsStudied[homeDeckToTally, default: 0] += 1
                     }
                     lastTalliedHomeDeck = homeDeckToTally
+                    lastAnsweredCard = cardId
+                    if showsEachCardOnce { seenThisSession.insert(cardId) }
 
-                    cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats)
+                    cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats, skipping: seenThisSession)
                     remainingCounts = DeckCounts(
                         newCount: queue.newCount,
                         learnCount: queue.learningCount,
@@ -321,6 +363,7 @@ public final class ReviewSession {
         let notetypes = self.notetypes
         let notetypesClient = self.notetypesClient
         let cardRendering = self.cardRendering
+        let fetchLimit = queueFetchLimit
 
         Task {
             defer { isAdvancing = false }
@@ -328,7 +371,7 @@ public final class ReviewSession {
                 let queue = try await Task.detached {
                     try collection.undoLast()
                     // Re-fetch queue — Anki places the undone card at the front
-                    return try scheduler.getQueuedCards(200)
+                    return try scheduler.getQueuedCards(fetchLimit)
                 }.value
 
                 canUndo = false
@@ -347,11 +390,15 @@ public final class ReviewSession {
                     if let deck = lastTalliedHomeDeck {
                         newCardsStudied[deck, default: 0] -= 1
                     }
+                    if let card = lastAnsweredCard {
+                        seenThisSession.remove(card)
+                    }
                 }
                 lastRating = nil
                 lastTalliedHomeDeck = nil
+                lastAnsweredCard = nil
 
-                cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats)
+                cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats, skipping: seenThisSession)
                 remainingCounts = DeckCounts(
                     newCount: queue.newCount,
                     learnCount: queue.learningCount,
@@ -517,6 +564,8 @@ private extension ReviewSession {
         }
         preparedNext = nil
 
+        // An undo on the finished screen brings a card back.
+        if isFinished { isFinished = false }
         currentQueuedCard = next
         currentNote = prepared.note
         if let notetype = prepared.notetype {

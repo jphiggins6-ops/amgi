@@ -28,6 +28,7 @@ import SwiftUINavigation
 /// `#Preview`s build with a stub session.
 package struct ReviewView: View {
     let deckId: DeckID
+    let round: StudyRound?
     let onDismiss: () -> Void
 
     @Shared(.appStorage(ReviewPreferences.Keys.openLinksExternally))
@@ -56,20 +57,30 @@ package struct ReviewView: View {
 
     @State private var session: ReviewSession
     @State private var destination: ReviewDestination?
+    /// The screen can be closed twice over — Close tapped as a round's
+    /// finish hands back on its own — and must hand back once.
+    @State private var dismissed = false
 
-    /// - Parameter countsNewCardsAgainstHomeDecks: for a filtered deck built
-    ///   in place of the normal daily queue (the Library's New button),
-    ///   charge the new cards learned in it to their home decks' daily
-    ///   limits when the session closes. See `ReviewSession`.
+    /// - Parameters:
+    ///   - countsNewCardsAgainstHomeDecks: for a filtered deck built in place
+    ///     of the normal daily queue (the Library's New button), charge the
+    ///     new cards learned in it to their home decks' daily limits when
+    ///     the session closes. See `ReviewSession`.
+    ///   - round: for the Library's study buttons, show each card once and
+    ///     count progress against the whole day. See `StudyRound`.
     package init(
         deckId: DeckID,
         countsNewCardsAgainstHomeDecks: Bool = false,
+        round: StudyRound? = nil,
         onDismiss: @escaping () -> Void
     ) {
         self.deckId = deckId
+        self.round = round
         self.onDismiss = onDismiss
         let session = ReviewSession(deckId: deckId)
         session.countsNewCardsAgainstHomeDecks = countsNewCardsAgainstHomeDecks
+        session.showsEachCardOnce = round != nil
+        session.cardsDoneBefore = round?.doneEarlierToday ?? 0
         self._session = State(initialValue: session)
     }
 
@@ -84,7 +95,10 @@ package struct ReviewView: View {
             showNextReviewTime: showNextReviewTime,
             destination: $destination,
             showTimeLeft: Binding($showTimeLeft),
+            round: round,
             onDismiss: {
+                guard !dismissed else { return }
+                dismissed = true
                 // Recorded before handing back, so the screen underneath
                 // reloads its counts after the limits have been charged.
                 Task {

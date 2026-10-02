@@ -140,6 +140,7 @@ let package = Package(
             name: "DecksFeatureTests",
             dependencies: [
                 "DecksFeature",
+                "ReviewFeature",
                 "AppCore",
                 "AppShared",
                 .product(name: "UI", package: "AmgiUI"),

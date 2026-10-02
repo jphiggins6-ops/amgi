@@ -19,10 +19,21 @@ import AnkiKit
 /// in its list is always that head, so every card placed first here can be
 /// answered.
 enum ReviewQueueOrder {
-    static func arranged(_ cards: [QueuedReviewCard], defersRepeats: Bool) -> [QueuedReviewCard] {
-        guard defersRepeats else { return cards }
-        let firstLooks = cards.filter { !isIntradayLearning($0.card) }
-        let repeats = cards.filter { isIntradayLearning($0.card) }
+    /// - Parameter seen: cards to leave out altogether, for a session that
+    ///   shows each card once (`ReviewSession.showsEachCardOnce`). Leaving
+    ///   them out keeps the first card answerable: a card answered today is
+    ///   never back in the engine's main queue the same day (it's in
+    ///   learning, or due another day), so the first non-learning card left
+    ///   is still the main queue's head.
+    static func arranged(
+        _ cards: [QueuedReviewCard],
+        defersRepeats: Bool,
+        skipping seen: Set<CardID> = []
+    ) -> [QueuedReviewCard] {
+        let unseen = seen.isEmpty ? cards : cards.filter { !seen.contains($0.card.id) }
+        guard defersRepeats else { return unseen }
+        let firstLooks = unseen.filter { !isIntradayLearning($0.card) }
+        let repeats = unseen.filter { isIntradayLearning($0.card) }
         return firstLooks + repeats
     }
 
