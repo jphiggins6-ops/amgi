@@ -107,18 +107,27 @@ package struct DeckListView: View {
                 let finishing = Task { await model.finishStudyNow(launch.deckId) }
                 finishingStudyNow = finishing
                 // The round that completes today's minimum is followed by
-                // the day's summary, once the review screen has gone.
+                // the day's summary, once the review screen has gone. The
+                // icon turns green after it's closed: iPhone's "icon
+                // changed" alert would get in its way.
                 if launch.round.finishesTheDay {
+                    AppIconColor.hold()
                     Task {
                         await finishing.value
-                        guard await model.isDoneForToday() else { return }
+                        guard await model.isDoneForToday() else {
+                            AppIconColor.release()
+                            return
+                        }
                         try? await Task.sleep(for: .milliseconds(600))
                         showTodaySummary = true
                     }
                 }
             }
         }
-        .sheet(isPresented: $showTodaySummary, onDismiss: { Task { await model.load() } }) {
+        .sheet(isPresented: $showTodaySummary, onDismiss: {
+            AppIconColor.release()
+            Task { await model.load() }
+        }) {
             TodaySummarySheet()
         }
         .alert(

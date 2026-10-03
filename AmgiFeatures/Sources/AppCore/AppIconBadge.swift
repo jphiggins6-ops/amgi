@@ -49,6 +49,17 @@ public enum AppIconBadge: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// Whether the icon turns green: everything it counts is done for the
+    /// Anki day `date` falls in. With the number off, that's today's whole
+    /// minimum.
+    public func isDone(_ today: TodaySnapshot?, at date: Date, calendar: Calendar = .current) -> Bool {
+        guard let today, today.isCurrent(at: date, calendar: calendar) else { return false }
+        switch self {
+        case .reviewsLeft: return today.reviewsLeft == 0
+        case .cardsLeft, .off: return today.isDone
+        }
+    }
+
     /// The number to show now, and the number each of the next `days` Anki
     /// days begins with if the app isn't opened before then.
     public func plan(

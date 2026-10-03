@@ -44,6 +44,9 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.appIconBadge))
     private var appIconBadge: String = AppIconBadge.cardsLeft.rawValue
 
+    @Shared(.appStorage(ReviewPreferences.Keys.appIconTurnsGreen))
+    private var appIconTurnsGreen: Bool = true
+
     var body: some View {
         SettingsPage {
             cardOrderSection
@@ -104,11 +107,21 @@ struct ReviewSettingsView: View {
                         Text(verbatim: choice.title).tag(choice.rawValue)
                     }
                 }
+                SettingsSeparator()
+                SettingsToggleRow(
+                    title: "Turn green when done",
+                    systemImage: "checkmark.seal.fill",
+                    tone: .review,
+                    isOn: Binding($appIconTurnsGreen)
+                )
             }
-            SettingsFootnote("The red number on Amgi's icon: what's left of today, as on the widget. It drops as you study and goes once today's minimum is done. When a new day starts it moves on by itself, to an estimate until you open Amgi. iPhone asks once whether Amgi may show it; if you said no, turn on Badges in the Settings app → Notifications → Amgi.")
+            SettingsFootnote("The red number is what's left of today, as on the widget, and moves on by itself when a new day starts: an estimate until you open Amgi. Once it's all done, the stars turn green. iPhone only lets an app change its icon while it's open, with a short message each time, so they turn blue again the next time you open Amgi on a new day. No number? Turn on Badges in the Settings app → Notifications → Amgi.")
         }
         .onChange(of: appIconBadge) { _, choice in
-            Task { await updateAppIconBadge(style: AppIconBadge(rawValue: choice) ?? .cardsLeft) }
+            Task { await updateAppIcon(style: AppIconBadge(rawValue: choice) ?? .cardsLeft) }
+        }
+        .onChange(of: appIconTurnsGreen) { _, isOn in
+            Task { await updateAppIcon(turnsGreen: isOn) }
         }
     }
 

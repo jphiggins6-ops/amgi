@@ -149,6 +149,6 @@ package struct ReviewView: View {
               let updated = round.progress(today, cardsLeft: left)
         else { return }
         writeTodayWidget(updated)
-        Task { await updateAppIconBadge(updated) }
+        Task { await updateAppIcon(updated) }
     }
 }

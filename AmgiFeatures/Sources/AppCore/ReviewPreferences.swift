@@ -38,6 +38,7 @@ public enum ReviewPreferences {
         public static let problemCardLapses = "review_pref_problem_card_lapses"
         public static let handsFreeSpeed = "review_pref_hands_free_speed"
         public static let appIconBadge = "review_pref_app_icon_badge"
+        public static let appIconTurnsGreen = "review_pref_app_icon_turns_green"
     }
 
     public static var handsFreeSpeed: HandsFreeSpeed {
@@ -48,6 +49,12 @@ public enum ReviewPreferences {
     /// unless changed in Settings.
     public static var appIconBadge: AppIconBadge {
         UserDefaults.standard.string(forKey: Keys.appIconBadge).flatMap(AppIconBadge.init(rawValue:)) ?? .cardsLeft
+    }
+
+    /// Whether the icon's stars turn green once today is done. On unless
+    /// switched off in Settings.
+    public static var appIconTurnsGreen: Bool {
+        UserDefaults.standard.object(forKey: Keys.appIconTurnsGreen) as? Bool ?? true
     }
 
     /// A card forgotten this many times is flagged orange when it's

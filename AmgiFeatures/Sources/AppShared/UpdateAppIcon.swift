@@ -1,5 +1,5 @@
 //
-//  UpdateAppIconBadge.swift
+//  UpdateAppIcon.swift
 //  AppShared
 //
 
@@ -9,27 +9,26 @@ public import Foundation
 import UserNotifications
 #endif
 
-/// Puts what's left of today's minimum on Amgi's home-screen icon, as
-/// chosen in Settings → Review, and lines up the number each of the next
-/// few days begins with, so the icon moves on at the rollover while the
-/// app is closed.
+/// Brings Amgi's home-screen icon up to date with today, as chosen in
+/// Settings → Review → App Icon: the red number is what's left of today's
+/// minimum, and the stars turn green once it's done (`AppIconColor`).
 ///
-/// Those morning numbers are local notifications that carry nothing but a
-/// badge: nothing appears on screen, only the icon changes. A badge needs
-/// the notifications permission, which iOS asks for the first time there's
-/// a number to show; only badges are asked for.
+/// The number also moves on by itself at each of the next few rollovers
+/// while the app is closed: local notifications that carry nothing but a
+/// badge, so nothing appears on screen. A badge needs the notifications
+/// permission, which iOS asks for the first time there's a number to show;
+/// only badges are asked for.
 @MainActor
-public func updateAppIconBadge(
+public func updateAppIcon(
     _ today: TodaySnapshot? = TodaySnapshotStore.read(),
     style: AppIconBadge = ReviewPreferences.appIconBadge,
+    turnsGreen: Bool = ReviewPreferences.appIconTurnsGreen,
     now: Date = Date()
 ) async {
-    // Not from tests or previews: there's no icon to badge, and the
+    // Not from tests or previews: there's no icon to change, and the
     // notification center can't be reached from them.
-    let environment = ProcessInfo.processInfo.environment
-    if environment["XCTestConfigurationFilePath"] != nil || environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1" {
-        return
-    }
+    guard !AppIconColor.isTestOrPreview else { return }
+    AppIconColor.show(done: turnsGreen && style.isDone(today, at: now))
     #if os(iOS)
     await IconBadge.update(today, style: style, now: now)
     #endif

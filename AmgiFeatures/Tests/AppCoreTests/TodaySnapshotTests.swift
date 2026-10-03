@@ -124,6 +124,18 @@ import Testing
         #expect(AppIconBadge.cardsLeft.count(.unknown) == nil)
     }
 
+    @Test func theIconTurnsGreenOnceWhatItCountsIsDone() {
+        let noon = date(10, 12)
+        #expect(!AppIconBadge.cardsLeft.isDone(today(), at: noon, calendar: calendar))
+        #expect(!AppIconBadge.cardsLeft.isDone(today(reviewsLeft: 0), at: noon, calendar: calendar), "new cards still left")
+        #expect(AppIconBadge.cardsLeft.isDone(today(reviewsLeft: 0, newLeft: 0), at: noon, calendar: calendar))
+        #expect(AppIconBadge.reviewsLeft.isDone(today(reviewsLeft: 0), at: noon, calendar: calendar), "counting reviews only")
+        #expect(!AppIconBadge.off.isDone(today(reviewsLeft: 0), at: noon, calendar: calendar), "no number: the whole minimum")
+        #expect(AppIconBadge.off.isDone(today(reviewsLeft: 0, newLeft: 0), at: noon, calendar: calendar))
+        #expect(!AppIconBadge.cardsLeft.isDone(today(reviewsLeft: 0, newLeft: 0), at: date(11, 5), calendar: calendar), "a new day has begun")
+        #expect(!AppIconBadge.cardsLeft.isDone(nil, at: noon, calendar: calendar))
+    }
+
     @Test func theIconMovesOnEachMorningWhileTheAppIsClosed() {
         let plan = AppIconBadge.cardsLeft.plan(now: date(10, 12), today: today(), forecast: forecast(), calendar: calendar)
         #expect(plan.now == 128)

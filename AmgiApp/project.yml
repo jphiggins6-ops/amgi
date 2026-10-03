@@ -216,6 +216,11 @@ targets:
         # "Failed to instantiate type AmgiWidgetIntent by name" on launch.
         # Cosmetic, and the price of having any app-level intents at all.
 
+        # The green "done for today" icon (Assets.xcassets/AppIconDone), which
+        # the app switches to once today's minimum is done. An asset catalog's
+        # alternate icons are only built when named here.
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: AppIconDone
+
   AmgiWidget:
     type: app-extension
     platform: iOS

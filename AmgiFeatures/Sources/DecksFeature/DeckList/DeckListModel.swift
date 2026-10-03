@@ -89,7 +89,7 @@ final class DeckListModel {
             let snapshot = Self.todaySnapshot(today, rolloverHour: rolloverHour, now: Date())
             writeTodayWidget(snapshot)
             // Not awaited: the first time, it waits on the permission prompt.
-            Task { await updateAppIconBadge(snapshot) }
+            Task { await updateAppIcon(snapshot) }
         } catch {
             Log.decks.error("Error loading decks: \(error)")
             // NOT .empty — that is the genuine no-decks state, and rendering a
