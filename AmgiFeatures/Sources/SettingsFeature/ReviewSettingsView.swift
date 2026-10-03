@@ -41,6 +41,7 @@ struct ReviewSettingsView: View {
         SettingsPage {
             cardOrderSection
             progressSection
+            ProblemCardsSection()
             gesturesSection
             cardDisplaySection
             answerButtonsSection

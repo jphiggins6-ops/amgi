@@ -666,6 +666,79 @@ import AnkiServices
         }
     }
 
+    // MARK: - Problem cards
+
+    private static func reviewCard(lapses: Int32, flags: Int32 = 0, type: Int16 = 2) -> CardRecord {
+        CardRecord(id: CardID(1), nid: NoteID(1), did: DeckID(1), mod: 0, type: type, queue: 2, lapses: lapses, flags: flags)
+    }
+
+    @Test func aCardForgottenOftenEnoughBecomesAProblemCard() {
+        #expect(ProblemCardRule.isProblem(after: .again, on: Self.reviewCard(lapses: 4), threshold: 5))
+        #expect(ProblemCardRule.isProblem(after: .again, on: Self.reviewCard(lapses: 9), threshold: 5), "still a problem past it")
+        #expect(!ProblemCardRule.isProblem(after: .again, on: Self.reviewCard(lapses: 3), threshold: 5), "one short")
+        #expect(!ProblemCardRule.isProblem(after: .good, on: Self.reviewCard(lapses: 9), threshold: 5), "remembered")
+        #expect(!ProblemCardRule.isProblem(after: .again, on: Self.reviewCard(lapses: 9, type: 3), threshold: 5), "relearning adds no lapse")
+        #expect(!ProblemCardRule.isProblem(after: .again, on: Self.reviewCard(lapses: 9, flags: 1), threshold: 5), "already flagged")
+        #expect(!ProblemCardRule.isProblem(after: .again, on: Self.reviewCard(lapses: 9), threshold: 0), "switched off")
+        #expect(ProblemCardRule.existingSearch(threshold: 5) == "prop:lapses>=5 flag:0 -deck:p")
+    }
+
+    /// A miss that reaches the threshold flags the card orange when the
+    /// session closes, not mid-session; an undone miss flags nothing.
+    @Test func problemCardsAreFlaggedAsTheSessionCloses() async throws {
+        let shaky = QueuedReviewCard.preview(
+            cardId: CardID(1), noteId: NoteID(101), ord: 0, queue: 2, type: 2, lapses: 4
+        )
+        let other = Self.card(2, queue: 2)
+
+        final class Recorder: @unchecked Sendable {
+            private let lock = NSLock()
+            private var answered = 0
+            private var flags: [String] = []
+            var answeredCount: Int { lock.lock(); defer { lock.unlock() }; return answered }
+            func step(_ delta: Int) { lock.lock(); answered += delta; lock.unlock() }
+            func flag(_ entry: String) { lock.lock(); flags.append(entry); lock.unlock() }
+            var flagged: [String] { lock.lock(); defer { lock.unlock() }; return flags }
+        }
+        let log = Recorder()
+
+        try await withDependencies {
+            $0.decksService.setCurrentDeck = { _ in }
+            $0.schedulerService.getQueuedCards = { _ in
+                log.answeredCount == 0
+                    ? QueuedCardsResult(cards: [shaky, other], newCount: 0, learningCount: 0, reviewCount: 2)
+                    : QueuedCardsResult(cards: [other], newCount: 0, learningCount: 0, reviewCount: 1)
+            }
+            $0.schedulerService.answerReviewCard = { _, _, _, _ in log.step(1) }
+            $0.collectionService.undoLast = { log.step(-1) }
+            $0.cardClient.flag = { id, flag in log.flag("\(id.rawValue):\(flag)") }
+            $0.notesService.getNote = { id in
+                NoteRecord(id: id, guid: "g", mid: NotetypeID(200), mod: 0, flds: "", sfld: "", csum: 0)
+            }
+            $0.cardRenderingService.renderCard = { _ in
+                RenderedCard(frontHTML: "f", backHTML: "b", cardCSS: "")
+            }
+        } operation: {
+            let s = ReviewSession(deckId: DeckID(1))
+            s.problemCardLapses = 5
+            s.start()
+            try await pollUntil { s.currentCardId == CardID(1) && !s.isAdvancing }
+
+            s.answer(rating: .again)
+            try await pollUntil { s.currentCardId == other.card.id && !s.isAdvancing }
+            #expect(log.flagged.isEmpty, "nothing flagged mid-session")
+
+            s.undo()
+            try await pollUntil { s.currentCardId == CardID(1) && !s.isAdvancing }
+            #expect(await s.flagProblemCards() == 0, "the undone miss doesn't count")
+
+            s.answer(rating: .again)
+            try await pollUntil { s.currentCardId == other.card.id && !s.isAdvancing }
+            #expect(await s.flagProblemCards() == 1)
+            #expect(log.flagged == ["1:2"], "flagged orange")
+        }
+    }
+
     // MARK: - New cards learned in a filtered deck
 
     /// The engine credits an answer to the filtered deck the card sits in,

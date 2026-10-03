@@ -81,11 +81,12 @@ final class DeckListModel {
             // tree) and phase two (a 365-day revlog scan) have very
             // different costs, and a single interval hides which one the
             // launch path is actually waiting on.
-            let (hero, heatmap) = await AppSignpost.measure("DeckListActivity") {
+            let (hero, heatmap, rolloverHour) = await AppSignpost.measure("DeckListActivity") {
                 await buildHeroAndHeatmap(counts: counts)
             }
             guard !Task.isCancelled else { return }
             state = .loaded(rows: viewRows, hero: hero, heatmap: heatmap)
+            writeTodayWidget(Self.todaySnapshot(today, rolloverHour: rolloverHour, now: Date()))
         } catch {
             Log.decks.error("Error loading decks: \(error)")
             // NOT .empty — that is the genuine no-decks state, and rendering a
@@ -148,6 +149,26 @@ final class DeckListModel {
             newLeft: Self.newCardsToday(in: tree),
             newDone: newDone,
             dueAgain: dueAgain
+        )
+    }
+
+    /// Every due card seen once today and today's new cards learned.
+    func isDoneForToday() async -> Bool {
+        let tree = (try? await deckClient.fetchTree()) ?? []
+        let today = await todayProgress(tree: tree)
+        return today.reviewsLeft == 0 && today.newLeft == 0
+    }
+
+    /// The Today widget's copy of `today`.
+    static func todaySnapshot(_ today: TodayProgress, rolloverHour: Int, now: Date) -> TodaySnapshot {
+        TodaySnapshot(
+            reviewsLeft: today.reviewsLeft,
+            reviewsTotal: today.reviewsLeft + today.reviewsDone,
+            newLeft: today.newLeft,
+            newTotal: today.newLeft + today.newDone,
+            dueAgain: today.dueAgain,
+            dayStart: AnkiDay.start(of: now, rolloverHour: rolloverHour),
+            rolloverHour: rolloverHour
         )
     }
 
@@ -358,14 +379,17 @@ final class DeckListModel {
 }
 
 private extension DeckListModel {
-    func buildHeroAndHeatmap(counts: HeroData) async -> (HeroData, HeatmapCardData) {
+    /// Also returns Anki's day-boundary hour, which the graphs carry: 4 am
+    /// (Anki's default) when they can't be fetched.
+    func buildHeroAndHeatmap(counts: HeroData) async -> (HeroData, HeatmapCardData, Int) {
         // Window the streak over the same range we fetch, or the default
         // 28 silently caps a year's worth of data at 28 days.
         let graphDays = 365
         guard let graphs = try? await statsClient.fetchGraphs("", graphDays) else {
             return (
                 counts.withActivity(streak: 0, last14Days: Array(repeating: 0, count: 14)),
-                HeatmapCardData.empty
+                HeatmapCardData.empty,
+                4
             )
         }
         let reviewCounts = graphs.reviews.count
@@ -373,6 +397,6 @@ private extension DeckListModel {
             streak: StreakCalculator.streak(reviews: reviewCounts, window: graphDays),
             last14Days: StreakCalculator.lastNDaysTotals(reviews: reviewCounts, days: 14)
         )
-        return (hero, Self.buildHeatmap(reviews: reviewCounts))
+        return (hero, Self.buildHeatmap(reviews: reviewCounts), graphs.rolloverHour)
     }
 }

@@ -19,6 +19,7 @@ import BrowseFeature
 import TemplatesFeature
 import Sharing
 import ReviewCore
+import MnemonicCore
 import SwiftUINavigation
 
 // MARK: - Content
@@ -94,7 +95,8 @@ struct ReviewContent: View {
                         lookupHighlight: lookupHighlight,
                         shortcutsEnabled: keyboardActive,
                         lookupQuery: $destination.lookupText,
-                        onGesture: { perform($0) }
+                        onGesture: { perform($0) },
+                        onExplain: { explain() }
                     )
                 }
             }
@@ -141,7 +143,8 @@ struct ReviewContent: View {
                         cardActions: cardActions,
                         destination: $destination,
                         confirmDeleteNote: $confirmDeleteNote,
-                        showTimeLeft: $showTimeLeft
+                        showTimeLeft: $showTimeLeft,
+                        onExplain: { explain() }
                     )
                 }
             }
@@ -161,6 +164,9 @@ struct ReviewContent: View {
                         Task { await session.refreshAfterEdit() }
                     }
                 }
+            }
+            .sheet(item: $destination.explain) { card in
+                ExplainSheet(card: card)
             }
             .sheet(item: $destination.captureMnemonic) { note in
                 MnemonicCaptureSheet(note: note) {
@@ -221,6 +227,10 @@ struct ReviewContent: View {
             destination = session.currentNote.map(ReviewDestination.editNote)
         case .visualMnemonic:
             destination = session.currentNote.map(ReviewDestination.captureMnemonic)
+        case .explain:
+            // Explaining gives the answer away, so show it too.
+            session.revealAnswer()
+            explain()
         case .flagRed, .flagOrange, .flagGreen, .flagBlue:
             guard let cardId = session.currentCardId, let flag = action.flag else { return }
             Task {
@@ -230,6 +240,16 @@ struct ReviewContent: View {
         case .nothing, .again, .hard, .good, .easy:
             break
         }
+    }
+
+    /// Opens Explain on the card as its two sides show it.
+    private func explain() {
+        guard session.currentCardId != nil else { return }
+        destination = .explain(CardExplanation.Card(
+            questionHTML: session.frontHTML,
+            answerHTML: session.backHTML,
+            deckName: session.deckName
+        ))
     }
 
     #if !canImport(UIKit)
@@ -258,7 +278,8 @@ struct ReviewContent: View {
                 cardActions: cardActions,
                 destination: $destination,
                 confirmDeleteNote: $confirmDeleteNote,
-                showTimeLeft: $showTimeLeft
+                showTimeLeft: $showTimeLeft,
+                onExplain: { explain() }
             )
         }
         .buttonStyle(.plain)
@@ -412,6 +433,7 @@ private struct CardActionsMenu: View {
     @Binding var destination: ReviewDestination?
     @Binding var confirmDeleteNote: Bool
     @Binding var showTimeLeft: Bool
+    let onExplain: () -> Void
 
     @Environment(\.palette) private var palette
 
@@ -448,6 +470,13 @@ private struct CardActionsMenu: View {
                 } label: {
                     Label("Look Up", systemImage: "character.book.closed")
                 }
+
+                Button {
+                    onExplain()
+                } label: {
+                    Label("Explain with AI", systemImage: "lightbulb")
+                }
+                .disabled(session.currentCardId == nil)
 
                 Button {
                     if session.isAudioPlaying {

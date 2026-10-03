@@ -19,6 +19,8 @@ public struct LibraryHeroCard: View {
     let data: HeroData
     let onStartReviews: () -> Void
     let onStartNew: () -> Void
+    /// Opens the end-of-day summary; offered once today's minimum is done.
+    let onShowTodaySummary: (() -> Void)?
     /// True while the review-history fetch that feeds `streak` and
     /// `last14Days` is still in flight. The counts come from the deck tree
     /// and a search, and are real immediately, so the card renders at once
@@ -33,12 +35,14 @@ public struct LibraryHeroCard: View {
         data: HeroData,
         activityPending: Bool = false,
         onStartReviews: @escaping () -> Void,
-        onStartNew: @escaping () -> Void
+        onStartNew: @escaping () -> Void,
+        onShowTodaySummary: (() -> Void)? = nil
     ) {
         self.data = data
         self.activityPending = activityPending
         self.onStartReviews = onStartReviews
         self.onStartNew = onStartNew
+        self.onShowTodaySummary = onShowTodaySummary
     }
 
     public var body: some View {
@@ -54,6 +58,25 @@ public struct LibraryHeroCard: View {
                 HStack(spacing: 12) {
                     HeroStudyButton(tile: reviewsTile, action: onStartReviews)
                     HeroStudyButton(tile: newTile, action: onStartNew)
+                }
+
+                if data.isDoneForToday, let onShowTodaySummary {
+                    Button(action: onShowTodaySummary) {
+                        HStack {
+                            Label("Today's summary", systemImage: "list.bullet.rectangle")
+                            Spacer(minLength: 8)
+                            Image(systemName: "chevron.right")
+                                .accessibilityHidden(true)
+                        }
+                        .amgiFont(size: 15, weight: .semibold, relativeTo: .subheadline)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.white.opacity(0.18), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                    .buttonStyle(.pressScale)
+                    .accessibilityHint("Time studied, how much you got right, and your hardest cards")
                 }
 
                 SparklineBars(values: data.last14Days)

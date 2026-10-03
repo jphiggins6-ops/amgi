@@ -27,6 +27,7 @@ public struct LibraryListContent: View {
     let onDeleteDeck: (Int64) async -> Void
     let onRenameDeck: (DeckRowViewData) -> Void
     let onCreateDeck: () -> Void
+    let onShowTodaySummary: (() -> Void)?
 
     @AppStorage("appearance_deck_layout") private var layout: DeckLayout = .list
 
@@ -39,7 +40,8 @@ public struct LibraryListContent: View {
         onTapDeck: @escaping (DeckRowViewData) -> Void,
         onDeleteDeck: @escaping (Int64) async -> Void,
         onRenameDeck: @escaping (DeckRowViewData) -> Void,
-        onCreateDeck: @escaping () -> Void
+        onCreateDeck: @escaping () -> Void,
+        onShowTodaySummary: (() -> Void)? = nil
     ) {
         self.state = state
         self.selectedDeckID = selectedDeckID
@@ -50,6 +52,7 @@ public struct LibraryListContent: View {
         self.onDeleteDeck = onDeleteDeck
         self.onRenameDeck = onRenameDeck
         self.onCreateDeck = onCreateDeck
+        self.onShowTodaySummary = onShowTodaySummary
     }
 
     public var body: some View {
@@ -87,7 +90,8 @@ public struct LibraryListContent: View {
                     data: hero,
                     activityPending: heatmap == nil,
                     onStartReviews: onStartReviews,
-                    onStartNew: onStartNew
+                    onStartNew: onStartNew,
+                    onShowTodaySummary: onShowTodaySummary
                 )
                     .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 12, trailing: 0))
                     .listRowBackground(Color.clear)

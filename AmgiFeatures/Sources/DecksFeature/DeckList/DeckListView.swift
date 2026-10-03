@@ -33,6 +33,7 @@ package struct DeckListView: View {
     @State private var studyNow: DeckListModel.StudyNowLaunch?
     @State private var isBuildingStudyNow = false
     @State private var studyNowError: String?
+    @State private var showTodaySummary = false
     /// Emptying Study Now after a session; a new session waits for it, or
     /// the late empty could clear the deck the new session just built.
     @State private var finishingStudyNow: Task<Void, Never>?
@@ -80,7 +81,8 @@ package struct DeckListView: View {
             onTapDeck: { row in pendingDeck = row.asDeckInfo },
             onDeleteDeck: { rawID in await model.delete(DeckID(rawID)) },
             onRenameDeck: { row in renameTarget = row },
-            onCreateDeck: { showCreateSheet = true }
+            onCreateDeck: { showCreateSheet = true },
+            onShowTodaySummary: { showTodaySummary = true }
         )
         .equatable()
         .navigationTitle("Library")
@@ -102,8 +104,22 @@ package struct DeckListView: View {
         .fullScreenCover(item: $studyNow) { launch in
             ReviewView(deckId: launch.deckId, countsNewCardsAgainstHomeDecks: true, round: launch.round) {
                 studyNow = nil
-                finishingStudyNow = Task { await model.finishStudyNow(launch.deckId) }
+                let finishing = Task { await model.finishStudyNow(launch.deckId) }
+                finishingStudyNow = finishing
+                // The round that completes today's minimum is followed by
+                // the day's summary, once the review screen has gone.
+                if launch.round.finishesTheDay {
+                    Task {
+                        await finishing.value
+                        guard await model.isDoneForToday() else { return }
+                        try? await Task.sleep(for: .milliseconds(600))
+                        showTodaySummary = true
+                    }
+                }
             }
+        }
+        .sheet(isPresented: $showTodaySummary, onDismiss: { Task { await model.load() } }) {
+            TodaySummarySheet()
         }
         .alert(
             "Nothing to study",

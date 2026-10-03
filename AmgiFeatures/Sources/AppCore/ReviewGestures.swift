@@ -84,6 +84,7 @@ public enum ReviewGestureAction: String, CaseIterable, Identifiable, Sendable {
     case flagRed, flagOrange, flagGreen, flagBlue
     case editNote
     case visualMnemonic
+    case explain
 
     public var id: String { rawValue }
 
@@ -103,6 +104,7 @@ public enum ReviewGestureAction: String, CaseIterable, Identifiable, Sendable {
         case .flagBlue: "Blue flag"
         case .editNote: "Edit note"
         case .visualMnemonic: "Visual mnemonic"
+        case .explain: "Explain (AI)"
         }
     }
 

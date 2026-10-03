@@ -100,9 +100,11 @@ package struct ReviewView: View {
                 guard !dismissed else { return }
                 dismissed = true
                 // Recorded before handing back, so the screen underneath
-                // reloads its counts after the limits have been charged.
+                // reloads its counts after the limits have been charged and
+                // the problem cards have gone to the Graveyard.
                 Task {
                     await session.recordNewCardsStudied()
+                    await session.flagProblemCards()
                     onDismiss()
                 }
             }

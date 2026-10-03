@@ -39,6 +39,8 @@ struct ReviewCardArea: View {
     @Binding var lookupQuery: String?
     /// A tap area or swipe on the card; the reviewer decides what it does.
     var onGesture: ((ReviewGesture) -> Void)? = nil
+    /// Shows an Explain button over the rating bar once the answer is up.
+    var onExplain: (() -> Void)? = nil
 
     @Environment(\.palette) private var palette
     @Shared(.appStorage(ReaderPreferences.Keys.dictionaryScanLength))
@@ -106,6 +108,21 @@ struct ReviewCardArea: View {
             }
 
             if session.showAnswer {
+                if let onExplain {
+                    HStack {
+                        Spacer()
+                        Button(action: onExplain) {
+                            Label("Explain", systemImage: "lightbulb")
+                                .amgiFont(.captionBold)
+                        }
+                        .buttonStyle(.bordered)
+                        .buttonBorderShape(.capsule)
+                        .controlSize(.small)
+                        .accessibilityHint("Asks the AI why this answer is right")
+                    }
+                    .padding(.horizontal)
+                    .padding(.top, AmgiSpacing.xs)
+                }
                 answerButtons
             } else {
                 Button {

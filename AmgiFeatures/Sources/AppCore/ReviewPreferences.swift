@@ -35,6 +35,17 @@ public enum ReviewPreferences {
         public static let autoMatchCardBackground = "review_pref_auto_match_card_background"
         public static let defersRepeats = "review_pref_defers_repeats"
         public static let showTimeLeft = "review_pref_show_time_left"
+        public static let problemCardLapses = "review_pref_problem_card_lapses"
+    }
+
+    /// A card forgotten this many times is flagged orange when it's
+    /// forgotten again, which sends it to the Graveyard to be fixed. 0 turns
+    /// it off.
+    public static let defaultProblemCardLapses = 5
+    public static let problemCardLapsesChoices = [0, 3, 4, 5, 6, 8, 10]
+
+    public static var problemCardLapses: Int {
+        UserDefaults.standard.object(forKey: Keys.problemCardLapses) as? Int ?? defaultProblemCardLapses
     }
 
     /// Whether a review shows every due card once before bringing back

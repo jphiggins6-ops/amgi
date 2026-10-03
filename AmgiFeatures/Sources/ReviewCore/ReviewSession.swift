@@ -34,6 +34,7 @@ public final class ReviewSession {
     @ObservationIgnored @Dependency(\.notesService) var notes
     @ObservationIgnored @Dependency(\.notetypesService) var notetypes
     @ObservationIgnored @Dependency(\.notetypesClient) var notetypesClient
+    @ObservationIgnored @Dependency(\.cardClient) var cardClient
 
     public private(set) var frontHTML: String = ""
     public private(set) var backHTML: String = ""
@@ -96,6 +97,15 @@ public final class ReviewSession {
     @ObservationIgnored private var lastAnsweredCard: CardID?
     /// How many cards the engine counted in the deck as the session began.
     private var cardsAtStart = 0
+    /// Lapses that make a card a problem card (`ProblemCardRule`); 0 is
+    /// off. Read once per session.
+    @ObservationIgnored public var problemCardLapses = ReviewPreferences.problemCardLapses
+    /// Problem cards found this session, flagged for the Graveyard as it
+    /// closes (`flagProblemCards()`). Flagging at once would put a flag
+    /// change between the answer and Undo.
+    @ObservationIgnored private var problemCards: Set<CardID> = []
+    /// The problem card the last answer found, so an undo can drop it.
+    @ObservationIgnored private var lastProblemCard: CardID?
     /// The home deck the last answer was tallied under, so an undo can take
     /// it back off.
     @ObservationIgnored private var lastTalliedHomeDeck: DeckID?
@@ -292,6 +302,7 @@ public final class ReviewSession {
         let states = queued.states
         // Queue 0 is Anki's new queue; a non-zero original deck means the
         // card is in a filtered deck.
+        let isProblem = ProblemCardRule.isProblem(after: rating, on: queued.card, threshold: problemCardLapses)
         let homeDeckToTally: DeckID? = countsNewCardsAgainstHomeDecks
             && queued.card.queue == 0
             && queued.card.odid.rawValue != 0
@@ -332,6 +343,8 @@ public final class ReviewSession {
                     lastTalliedHomeDeck = homeDeckToTally
                     lastAnsweredCard = cardId
                     if showsEachCardOnce { seenThisSession.insert(cardId) }
+                    lastProblemCard = isProblem ? cardId : nil
+                    if isProblem { problemCards.insert(cardId) }
 
                     cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats, skipping: seenThisSession)
                     remainingCounts = DeckCounts(
@@ -393,10 +406,14 @@ public final class ReviewSession {
                     if let card = lastAnsweredCard {
                         seenThisSession.remove(card)
                     }
+                    if let card = lastProblemCard {
+                        problemCards.remove(card)
+                    }
                 }
                 lastRating = nil
                 lastTalliedHomeDeck = nil
                 lastAnsweredCard = nil
+                lastProblemCard = nil
 
                 cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats, skipping: seenThisSession)
                 remainingCounts = DeckCounts(
@@ -429,6 +446,26 @@ public final class ReviewSession {
                 }
             }
         }.value
+    }
+
+    /// Flags the problem cards found this session orange, sending them to
+    /// the Graveyard, then clears the list. Call as the session closes.
+    /// Returns how many were flagged.
+    @discardableResult
+    public func flagProblemCards() async -> Int {
+        let cards = problemCards
+        problemCards = []
+        lastProblemCard = nil
+        var flagged = 0
+        for card in cards {
+            do {
+                try await cardClient.flag(card, ProblemCardRule.flag)
+                flagged += 1
+            } catch {
+                Log.review.error("Flagging problem card \(card.rawValue) failed: \(error)")
+            }
+        }
+        return flagged
     }
 
     public func updateAudioPlaying(_ playing: Bool) {

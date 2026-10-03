@@ -50,13 +50,16 @@ public struct QueuedReviewCard: Sendable {
     /// Convenience factory for tests and SwiftUI previews.
     /// `queue` is the card's Anki queue: 0 new, 1 learning, 2 review. A
     /// non-zero `originalDeckId` puts the card in a filtered deck, with
-    /// that as its home deck.
+    /// that as its home deck. `type` is the card's Anki type (2 review) and
+    /// `lapses` how often it has been forgotten.
     public static func preview(
         cardId: CardID,
         noteId: NoteID,
         ord: Int32,
         queue: Int16 = 0,
-        originalDeckId: DeckID = DeckID(0)
+        originalDeckId: DeckID = DeckID(0),
+        type: Int16 = 0,
+        lapses: Int32 = 0
     ) -> QueuedReviewCard {
         let emptyToken = SchedulingStateToken(Data())
         let states = ReviewSchedulingStates(
@@ -64,7 +67,8 @@ public struct QueuedReviewCard: Sendable {
             hard: emptyToken, good: emptyToken, easy: emptyToken
         )
         let card = CardRecord(
-            id: cardId, nid: noteId, did: DeckID(1), ord: ord, mod: 0, queue: queue, odid: originalDeckId
+            id: cardId, nid: noteId, did: DeckID(1), ord: ord, mod: 0, type: type, queue: queue,
+            lapses: lapses, odid: originalDeckId
         )
         return QueuedReviewCard(card: card, states: states, nextIntervals: [:])
     }

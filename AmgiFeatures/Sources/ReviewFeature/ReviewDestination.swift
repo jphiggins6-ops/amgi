@@ -8,6 +8,7 @@
 import Foundation
 import CasePaths
 import AnkiKit
+import MnemonicCore
 import ReviewCore
 
 /// Single source of truth for every modal axis on the review screen: the note
@@ -29,6 +30,8 @@ enum ReviewDestination {
     case editTemplate(ReviewSession.TemplateTarget)
     case lookup(String)
     case captureMnemonic(NoteRecord)
+    /// "Explain": the AI's take on why the answer is right.
+    case explain(CardExplanation.Card)
 }
 
 extension Optional where Wrapped == ReviewDestination {
