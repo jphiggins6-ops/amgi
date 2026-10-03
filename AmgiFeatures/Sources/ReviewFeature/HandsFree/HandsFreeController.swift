@@ -45,6 +45,8 @@ final class HandsFreeController {
     /// sessions never turn hands-free on.
     @ObservationIgnored private var voice: (speaker: CardSpeaker, listener: VoiceListener)?
     @ObservationIgnored private var loop: Task<Void, Never>?
+    /// The reading and listening under way, so `stop()` can end it.
+    @ObservationIgnored private var currentRace: Race?
 
     private var speaker: CardSpeaker { audio.speaker }
     private var listener: VoiceListener { audio.listener }
@@ -70,6 +72,8 @@ final class HandsFreeController {
     func stop() {
         loop?.cancel()
         loop = nil
+        currentRace?.finish(.cancelled)
+        currentRace = nil
         voice?.speaker.stop()
         voice?.listener.stop()
         if phase != .off {
@@ -180,44 +184,87 @@ final class HandsFreeController {
     /// headphones on, after it otherwise. With `listenAfter` off, reading
     /// to the end is itself the outcome. A tap that changes the card ends
     /// it early either way.
+    ///
+    /// The reading, the listening and the watch for taps race as plain
+    /// tasks, and the first to finish wins (`Race`). A task group is the
+    /// textbook way to write that, but Swift 6.2's region-based isolation
+    /// checker rejects main-actor child tasks in one ("Pattern that the
+    /// region-based isolation checker does not understand how to check").
     private func speakThenListen(
         _ text: String,
         then waiting: Phase,
         session: ReviewSession,
         listenAfter: Bool
     ) async -> Outcome {
+        guard !Task.isCancelled else { return .cancelled }
         let mark = SessionMark(session)
         let bargeIn = HandsFreeAudioSession.canListenWhileSpeaking
-        return await withTaskGroup(of: Outcome?.self) { group in
-            group.addTask { @MainActor in
-                await self.speaker.speak(text)
-                if Task.isCancelled { return nil }
-                if !listenAfter { return .spoke }
-                self.show(waiting)
-                if bargeIn { return nil }
-                return await self.hear()
+        let race = Race()
+        currentRace = race
+
+        race.add(Task {
+            await self.speaker.speak(text)
+            guard !race.isOver else { return }
+            guard listenAfter else {
+                race.finish(.spoke)
+                return
             }
-            if bargeIn {
-                group.addTask { @MainActor in
-                    await self.hear()
+            self.show(waiting)
+            guard !bargeIn, let heard = await self.hear() else { return }
+            race.finish(heard)
+        })
+        if bargeIn {
+            race.add(Task {
+                if let heard = await self.hear() { race.finish(heard) }
+            })
+        }
+        race.add(Task {
+            while !race.isOver {
+                if SessionMark(session) != mark {
+                    race.finish(.changed)
+                    return
                 }
+                try? await Task.sleep(for: .milliseconds(150))
             }
-            group.addTask { @MainActor in
-                while !Task.isCancelled {
-                    if SessionMark(session) != mark { return .changed }
-                    try? await Task.sleep(for: .milliseconds(150))
-                }
-                return nil
+        })
+
+        let outcome = await race.outcome()
+        if currentRace === race { currentRace = nil }
+        return outcome
+    }
+
+    /// The first of several tasks to finish decides the outcome; finishing
+    /// cancels the rest, which stops their reading or listening.
+    @MainActor
+    private final class Race {
+        private(set) var isOver = false
+        private var result: Outcome?
+        private var waiting: CheckedContinuation<Outcome, Never>?
+        private var tasks: [Task<Void, Never>] = []
+
+        func add(_ task: Task<Void, Never>) {
+            if isOver {
+                task.cancel()
+            } else {
+                tasks.append(task)
             }
-            var outcome = Outcome.cancelled
-            for await result in group {
-                if let result {
-                    outcome = result
-                    break
-                }
+        }
+
+        func finish(_ outcome: Outcome) {
+            guard !isOver else { return }
+            isOver = true
+            result = outcome
+            for task in tasks { task.cancel() }
+            tasks = []
+            waiting?.resume(returning: outcome)
+            waiting = nil
+        }
+
+        func outcome() async -> Outcome {
+            if let result { return result }
+            return await withCheckedContinuation { continuation in
+                waiting = continuation
             }
-            group.cancelAll()
-            return outcome
         }
     }
 

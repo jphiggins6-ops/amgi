@@ -80,11 +80,11 @@ final class ProblemCardsSweep {
     /// Cards found, waiting for confirmation.
     var found: [CardID]?
     /// What happened, for the closing alert.
-    var result: Result?
+    var result: Outcome?
     private(set) var isWorking = false
     @ObservationIgnored private var threshold = 0
 
-    enum Result: Equatable {
+    enum Outcome: Equatable {
         case nothingFound
         case sent(Int)
     }
