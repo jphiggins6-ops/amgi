@@ -126,6 +126,20 @@ private import SwiftProtobuf
         let proto = try Anki_Scheduler_ScheduleCardsAsNewRequest(serializedBytes: envelope.body)
         #expect(proto.cardIds == [1, 2, 3])
         #expect(proto.log)
+        #expect(!proto.restorePosition)
+        #expect(!proto.resetCounts)
+        #expect(!proto.hasContext, "the Reset dialog's remembered defaults are left alone")
+    }
+
+    @Test func scheduleCardsAsNew_encodes_the_reset_options() throws {
+        let envelope: Request<Void> = .scheduleCardsAsNew(
+            cardIds: [CardID(9)], log: true, restorePosition: true, resetCounts: true
+        )
+        let proto = try Anki_Scheduler_ScheduleCardsAsNewRequest(serializedBytes: envelope.body)
+        #expect(proto.cardIds == [9])
+        #expect(proto.restorePosition)
+        #expect(proto.resetCounts)
+        #expect(!proto.hasContext)
     }
 
     // MARK: - setDueDate

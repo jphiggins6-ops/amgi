@@ -82,6 +82,14 @@ extension CardClient: DependencyKey {
             resetToNew: { cardId in
                 try await backend.invoke(.scheduleCardsAsNew(cardIds: [cardId], log: true))
             },
+            startOver: { cardId, restorePosition, resetCounts in
+                try await backend.invoke(.scheduleCardsAsNew(
+                    cardIds: [cardId],
+                    log: true,
+                    restorePosition: restorePosition,
+                    resetCounts: resetCounts
+                ))
+            },
             setDueDate: { cardId, days in
                 try await backend.invoke(.setDueDate(cardIds: [cardId], days: days))
             },

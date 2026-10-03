@@ -69,11 +69,20 @@ final class GraveyardCardModel {
             .joined(separator: " — ")
     }
 
-    /// Clears the flag, so the card leaves the Graveyard and rejoins reviews.
+    /// Starts the fixed card over as a new card, then clears its flag, so it
+    /// leaves the Graveyard and is learned again from scratch. It goes back
+    /// to its old place among the new cards, where Anki knows it, so it's
+    /// soon among the New button's cards; its review and lapse counts are
+    /// cleared too, or the problem-card rule would flag it again the first
+    /// time it's missed. Reset first: if that fails, the card keeps its
+    /// flag and stays here to try again.
     func markFixed() async -> Bool {
         let cardId = item.cardId
         let cardClient = self.cardClient
-        return await run { try await cardClient.flag(cardId, 0) }
+        return await run {
+            try await cardClient.startOver(cardId, true, true)
+            try await cardClient.flag(cardId, 0)
+        }
     }
 
     func deleteNote() async -> Bool {
@@ -155,7 +164,7 @@ struct GraveyardCardView: View {
                     Label("Mark as Fixed", systemImage: "checkmark.circle")
                 }
             } footer: {
-                Text("Removes the flag, so the card leaves the Graveyard and rejoins your reviews.")
+                Text("Starts the card over as a new card and removes the flag, so you learn the fixed version from scratch. It goes back to its original place in your new cards.")
             }
 
             Section {

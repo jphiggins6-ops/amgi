@@ -24,6 +24,10 @@ public struct CardClient: Sendable {
     public var bury: @Sendable (_ cardId: CardID) async throws -> Void
     public var flag: @Sendable (_ cardId: CardID, _ value: UInt32) async throws -> Void
     public var resetToNew: @Sendable (_ cardId: CardID) async throws -> Void
+    /// Starts a card over as new, as Anki's Reset does: `restorePosition`
+    /// puts it back where it was among the new cards when that's known
+    /// (otherwise last), and `resetCounts` zeroes its reviews and lapses.
+    public var startOver: @Sendable (_ cardId: CardID, _ restorePosition: Bool, _ resetCounts: Bool) async throws -> Void
     public var setDueDate: @Sendable (_ cardId: CardID, _ days: String) async throws -> Void
     public var undoLast: @Sendable () async throws -> Void
     public var getCardFlags: @Sendable (_ cardId: CardID) async throws -> UInt32

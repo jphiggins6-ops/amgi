@@ -128,6 +128,45 @@ import Dependencies
         await model.retry()
         #expect(attempts.all.count == 2)
     }
+
+    // MARK: - Mark as Fixed
+
+    private static let flagged = GraveyardItem(
+        cardId: CardID(7), noteId: NoteID(70), flag: 2, front: "Q", deckName: "Peds"
+    )
+
+    @Test func aFixedCardStartsOverAsNewThenLosesItsFlag() async {
+        let calls = Recorder<String>()
+        let model = withDependencies {
+            $0.cardClient.startOver = { id, restorePosition, resetCounts in
+                calls.record("start over \(id.rawValue), restore position \(restorePosition), reset counts \(resetCounts)")
+            }
+            $0.cardClient.flag = { id, flag in calls.record("flag \(id.rawValue) \(flag)") }
+        } operation: {
+            GraveyardCardModel(item: Self.flagged)
+        }
+
+        #expect(await model.markFixed())
+        #expect(calls.all == [
+            "start over 7, restore position true, reset counts true",
+            "flag 7 0",
+        ])
+    }
+
+    @Test func aCardThatCouldntStartOverKeepsItsFlag() async {
+        struct Boom: Error, LocalizedError { var errorDescription: String? { "boom" } }
+        let flags = Recorder<UInt32>()
+        let model = withDependencies {
+            $0.cardClient.startOver = { _, _, _ in throw Boom() }
+            $0.cardClient.flag = { _, flag in flags.record(flag) }
+        } operation: {
+            GraveyardCardModel(item: Self.flagged)
+        }
+
+        #expect(await model.markFixed() == false)
+        #expect(flags.all.isEmpty, "it stays in the Graveyard, to try again")
+        #expect(model.errorMessage == "boom")
+    }
 }
 
 // MARK: - Fixtures
