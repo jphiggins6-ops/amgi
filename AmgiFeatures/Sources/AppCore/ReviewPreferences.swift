@@ -36,6 +36,11 @@ public enum ReviewPreferences {
         public static let defersRepeats = "review_pref_defers_repeats"
         public static let showTimeLeft = "review_pref_show_time_left"
         public static let problemCardLapses = "review_pref_problem_card_lapses"
+        public static let handsFreeSpeed = "review_pref_hands_free_speed"
+    }
+
+    public static var handsFreeSpeed: HandsFreeSpeed {
+        UserDefaults.standard.string(forKey: Keys.handsFreeSpeed).flatMap(HandsFreeSpeed.init(rawValue:)) ?? .normal
     }
 
     /// A card forgotten this many times is flagged orange when it's
@@ -53,6 +58,21 @@ public enum ReviewPreferences {
     /// Settings; the watch has no toggle and always gets the default.
     public static var defersRepeats: Bool {
         UserDefaults.standard.object(forKey: Keys.defersRepeats) as? Bool ?? true
+    }
+}
+
+/// How fast hands-free mode reads cards aloud.
+public enum HandsFreeSpeed: String, CaseIterable, Identifiable, Sendable {
+    case slow, normal, fast
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .slow: "Slow"
+        case .normal: "Normal"
+        case .fast: "Fast"
+        }
     }
 }
 

@@ -37,11 +37,15 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.showTimeLeft))
     private var showTimeLeft: Bool = true
 
+    @Shared(.appStorage(ReviewPreferences.Keys.handsFreeSpeed))
+    private var handsFreeSpeed: String = HandsFreeSpeed.normal.rawValue
+
     var body: some View {
         SettingsPage {
             cardOrderSection
             progressSection
             ProblemCardsSection()
+            handsFreeSection
             gesturesSection
             cardDisplaySection
             answerButtonsSection
@@ -78,6 +82,25 @@ struct ReviewSettingsView: View {
                 )
             }
             SettingsFootnote("Shown at the top while reviewing, worked out from how fast you've answered so far this session, with extra turns for new cards and for cards you miss. You can also turn it off from the ⋯ menu while reviewing.")
+        }
+    }
+
+    private var handsFreeSection: some View {
+        Group {
+            SettingsSectionHeader(title: "Hands-Free")
+            SettingsGroup {
+                SettingsPickerRow(
+                    title: "Reading speed",
+                    systemImage: "headphones",
+                    tone: .accent,
+                    selection: Binding($handsFreeSpeed)
+                ) {
+                    ForEach(HandsFreeSpeed.allCases) { speed in
+                        Text(verbatim: speed.title).tag(speed.rawValue)
+                    }
+                }
+            }
+            SettingsFootnote("Start it from ⋯ while reviewing. Each card is read aloud: say “show” to hear the answer, then “again”, “hard”, “good” or “easy”. Rate straight away and the answer is read before the next card. “Repeat”, “undo” and “stop” work any time. With headphones you can talk over the reading; out of the speaker, wait for it to finish. It keeps going with the screen locked.")
         }
     }
 

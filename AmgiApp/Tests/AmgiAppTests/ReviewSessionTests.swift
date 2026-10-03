@@ -739,6 +739,48 @@ import AnkiServices
         }
     }
 
+    // MARK: - Hands-free
+
+    @Test func theLastCommandWordSaidCounts() {
+        #expect(VoiceCommand.lastCommand(in: "show") == .reveal)
+        #expect(VoiceCommand.lastCommand(in: "Hmm… good") == .rate(.good))
+        #expect(VoiceCommand.lastCommand(in: "again, no wait, easy!") == .rate(.easy), "later words win")
+        #expect(VoiceCommand.lastCommand(in: "Repeat that") == .repeatSide)
+        #expect(VoiceCommand.lastCommand(in: "undo") == .undo)
+        #expect(VoiceCommand.lastCommand(in: "OK stop") == .stop)
+        #expect(VoiceCommand.lastCommand(in: "what was that") == nil)
+        #expect(VoiceCommand.lastCommand(in: "goodness") == nil, "only whole words")
+    }
+
+    @Test func theAnswerIsReadWithoutTheQuestionAboveIt() {
+        let back = #"<style>.card{}</style><div class="card">Ptosis, miosis, anhidrosis?<hr id=answer>Horner syndrome<br>Sympathetic lesion</div>"#
+        #expect(SpokenCardText.answer(fromHTML: back) == "Horner syndrome. Sympathetic lesion.")
+        #expect(SpokenCardText.answer(fromHTML: "<b>Whole</b> back") == "Whole back.", "no divider: all of it")
+    }
+
+    @Test func whatTheCardDoesntShowIsntRead() {
+        // `##"`: the hint link's `href="#"` would end a `#"` string.
+        let front = ##"<div class="card"><span class="cloze">[...]</span> is the drug of choice<br><a class=hint href="#" onclick="this.style.display='none';return false;">Lecture Notes</a><div id="hint1" class=hint style="display: none">Hidden <div>nested</div> stuff</div></div>"##
+        #expect(SpokenCardText.question(fromHTML: front) == "blank is the drug of choice.")
+        let math = #"<div>\(x^2\) &amp; <img src="a.png"> [sound:a.mp3] <svg><path d="M0"/></svg>done</div>"#
+        #expect(SpokenCardText.readable(math) == "x^2 & done.")
+        #expect(SpokenCardText.readable(#"<img src="x.png">"#).isEmpty)
+    }
+
+    @Test func eachWritingSystemGetsItsOwnVoice() {
+        #expect(SpokenCardText.segments("안녕하세요. Hello there.") == [
+            .init(text: "안녕하세요.", script: .hangul),
+            .init(text: "Hello there.", script: .other),
+        ])
+        #expect(SpokenCardText.segments("日本語 (にほんご) means Japanese") == [
+            .init(text: "日本語 (にほんご)", script: .japanese),
+            .init(text: "means Japanese", script: .other),
+        ])
+        #expect(SpokenCardText.segments("中文") == [.init(text: "中文", script: .chinese)])
+        #expect(SpokenCardText.segments("1, 2, 3") == [.init(text: "1, 2, 3", script: .other)])
+        #expect(SpokenCardText.segments("  ").isEmpty)
+    }
+
     // MARK: - New cards learned in a filtered deck
 
     /// The engine credits an answer to the filtered deck the card sits in,

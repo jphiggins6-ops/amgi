@@ -29,11 +29,19 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Hands-free mode listens for the words you say to answer cards: “show”, “again”, “good” and so on.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Hands-free mode turns the words you say into answers. It recognizes them on this iPhone whenever it can.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Fonts/SarasaMonoK-Regular.ttf</string>
 		<string>Fonts/NanumMyeongjo-Regular.ttf</string>
 		<string>Fonts/NanumGothic-Regular.ttf</string>
+	</array>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

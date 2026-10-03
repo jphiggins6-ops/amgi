@@ -57,6 +57,10 @@ struct ReviewContent: View {
     /// Bumped when a tap or swipe flags a card, which otherwise shows only
     /// as the menu icon's colour.
     @State private var gestureFlagCount = 0
+    #if canImport(UIKit)
+    /// Reads cards aloud and takes answers by voice; see `HandsFreeController`.
+    @State private var handsFree = HandsFreeController()
+    #endif
 
     private var keyboardActive: Bool {
         destination == nil && !confirmDeleteNote
@@ -76,6 +80,12 @@ struct ReviewContent: View {
                 if showTimeLeft && session.startError == nil && !session.isFinished {
                     ReviewTimeLeft(session: session)
                 }
+
+                #if canImport(UIKit)
+                if handsFree.isOn || handsFree.problem != nil {
+                    HandsFreeBanner(controller: handsFree)
+                }
+                #endif
 
                 if let startError = session.startError {
                     ReviewStartFailureView(message: startError) { session.start() }
@@ -108,6 +118,12 @@ struct ReviewContent: View {
             .onReceive(NotificationCenter.default.publisher(for: .amgiDeviceDidShake)) { _ in
                 perform(.shake)
             }
+            // Hands-free gives way to anything opened over the card, and
+            // ends with the screen.
+            .onChange(of: destination != nil) { _, opened in
+                if opened { handsFree.stop() }
+            }
+            .onDisappear { handsFree.stop() }
             #endif
             .navigationBarTitleDisplayMode(.inline)
             #if canImport(UIKit)
@@ -144,7 +160,9 @@ struct ReviewContent: View {
                         destination: $destination,
                         confirmDeleteNote: $confirmDeleteNote,
                         showTimeLeft: $showTimeLeft,
-                        onExplain: { explain() }
+                        onExplain: { explain() },
+                        isHandsFreeOn: handsFree.isOn,
+                        onToggleHandsFree: { toggleHandsFree() }
                     )
                 }
             }
@@ -231,6 +249,8 @@ struct ReviewContent: View {
             // Explaining gives the answer away, so show it too.
             session.revealAnswer()
             explain()
+        case .handsFree:
+            toggleHandsFree()
         case .flagRed, .flagOrange, .flagGreen, .flagBlue:
             guard let cardId = session.currentCardId, let flag = action.flag else { return }
             Task {
@@ -240,6 +260,16 @@ struct ReviewContent: View {
         case .nothing, .again, .hard, .good, .easy:
             break
         }
+    }
+
+    private func toggleHandsFree() {
+        #if canImport(UIKit)
+        if handsFree.isOn {
+            handsFree.stop()
+        } else {
+            handsFree.start(session: session, finishMessage: round?.finishTitle ?? "That's all for now")
+        }
+        #endif
     }
 
     /// Opens Explain on the card as its two sides show it.
@@ -434,8 +464,15 @@ private struct CardActionsMenu: View {
     @Binding var confirmDeleteNote: Bool
     @Binding var showTimeLeft: Bool
     let onExplain: () -> Void
+    var isHandsFreeOn = false
+    /// Nil where hands-free isn't available.
+    var onToggleHandsFree: (() -> Void)? = nil
 
     @Environment(\.palette) private var palette
+
+    private var handsFreeTitle: String {
+        isHandsFreeOn ? "Stop Hands-Free" : "Hands-Free Mode"
+    }
 
     private var timeLeftToggleTitle: String {
         showTimeLeft ? "Hide Time Left" : "Show Time Left"
@@ -491,6 +528,14 @@ private struct CardActionsMenu: View {
                     )
                 }
                 .disabled(session.currentNote == nil)
+            }
+
+            if let onToggleHandsFree {
+                Section {
+                    Button(action: onToggleHandsFree) {
+                        Label(handsFreeTitle, systemImage: "headphones")
+                    }
+                }
             }
 
             Section {

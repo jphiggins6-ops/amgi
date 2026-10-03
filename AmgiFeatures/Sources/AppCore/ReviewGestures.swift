@@ -85,6 +85,7 @@ public enum ReviewGestureAction: String, CaseIterable, Identifiable, Sendable {
     case editNote
     case visualMnemonic
     case explain
+    case handsFree
 
     public var id: String { rawValue }
 
@@ -105,6 +106,7 @@ public enum ReviewGestureAction: String, CaseIterable, Identifiable, Sendable {
         case .editNote: "Edit note"
         case .visualMnemonic: "Visual mnemonic"
         case .explain: "Explain (AI)"
+        case .handsFree: "Hands-free on/off"
         }
     }
 
