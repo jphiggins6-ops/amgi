@@ -7,6 +7,7 @@ import Foundation
 import Testing
 import AnkiKit
 import AnkiClients
+import AppCore
 import Dependencies
 import ReviewFeature
 @testable import DecksFeature
@@ -287,6 +288,30 @@ import ReviewFeature
             Self.deck(12, "Study Now", isFiltered: true, new: 9),
         ]
         #expect(DeckListModel.newCardsToday(in: tree) == 27)
+    }
+
+    // MARK: - Leaving the app mid-round
+
+    @Test func leavingMidRoundCountsWhatsLeftOfIt() {
+        let today = TodaySnapshot(
+            reviewsLeft: 120,
+            reviewsTotal: 300,
+            newLeft: 8,
+            newTotal: 20,
+            dueAgain: 0,
+            dayStart: Date(timeIntervalSince1970: 0),
+            rolloverHour: 4
+        )
+        let reviews = StudyRound(kind: .reviews).progress(today, cardsLeft: 45)
+        #expect(reviews?.reviewsLeft == 45)
+        #expect(reviews?.reviewsTotal == 300)
+        #expect(reviews?.newLeft == 8)
+
+        let newCards = StudyRound(kind: .newCards).progress(today, cardsLeft: 3)
+        #expect(newCards?.newLeft == 3)
+        #expect(newCards?.reviewsLeft == 120)
+
+        #expect(StudyRound(kind: .again).progress(today, cardsLeft: 10) == nil, "not part of today's minimum")
     }
 }
 

@@ -90,6 +90,10 @@ import AnkiServices
         #expect(!session.isFinished, "Session should not be finished initially")
     }
 
+    @Test func onlyARoundCountsCardsLeftInIt() {
+        #expect(session.cardsLeftInRound == nil, "an ordinary session isn't a round")
+    }
+
     /// showAnswer should be false before any card is loaded (mirrors fork's testShowAnswerInitiallyFalse).
     @Test func showAnswerInitiallyFalse() {
         #expect(!session.showAnswer, "Answer should not be visible initially")
@@ -643,26 +647,31 @@ import AnkiServices
             s.defersRepeats = false
             s.showsEachCardOnce = true
             s.cardsDoneBefore = 10
+            #expect(s.cardsLeftInRound == nil, "not loaded yet")
             s.start()
             try await pollUntil { s.currentCardId == first.card.id && !s.isAdvancing }
             #expect(s.sessionTotal == 12, "10 done earlier today and 2 in the deck")
             #expect(s.cardPosition == 11)
+            #expect(s.cardsLeftInRound == 2)
 
             s.answer(rating: .again)
             try await pollUntil { s.currentCardId == second.card.id && !s.isAdvancing }
             #expect(s.currentCardId == second.card.id, "the missed card waits for another round")
             #expect(s.sessionTotal == 12, "the total doesn't grow when the missed card comes due")
             #expect(s.cardPosition == 12)
+            #expect(s.cardsLeftInRound == 1)
 
             s.answer(rating: .good)
             try await pollUntil { s.isFinished && !s.isAdvancing }
             #expect(s.isFinished, "every card has had its turn, though the missed one is due")
             #expect(s.progressFraction == 1)
+            #expect(s.cardsLeftInRound == 0)
 
             s.undo()
             try await pollUntil { s.currentCardId == second.card.id && !s.isAdvancing }
             #expect(!s.isFinished)
             #expect(s.cardPosition == 12)
+            #expect(s.cardsLeftInRound == 1)
         }
     }
 

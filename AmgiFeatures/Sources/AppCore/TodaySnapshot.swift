@@ -98,8 +98,10 @@ public enum TodayWidgetState: Equatable, Sendable {
     /// Today's numbers, as the app last saw them.
     case progress(TodaySnapshot)
     /// A new Anki day has begun since the app last saved them. The
-    /// estimate comes from the All Decks forecast, which counts every deck
-    /// and flag, so it's a guide rather than the Library's exact figure.
+    /// reviews come from the All Decks forecast, which counts every deck
+    /// and flag, so they're a guide rather than the Library's exact
+    /// figure. The new cards are as many as today brought: the daily
+    /// limits bring as many again, however many of today's are done.
     case newDay(estimatedReviews: Int?, estimatedNew: Int?)
     /// The app hasn't saved anything yet.
     case unknown
@@ -117,7 +119,7 @@ public enum TodayWidgetState: Equatable, Sendable {
         else { return .newDay(estimatedReviews: nil, estimatedNew: nil) }
         return .newDay(
             estimatedReviews: projected.reviewCount + projected.learnCount,
-            estimatedNew: projected.newCount
+            estimatedNew: today.newTotal
         )
     }
 

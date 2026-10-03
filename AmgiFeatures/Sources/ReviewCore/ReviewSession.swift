@@ -175,6 +175,16 @@ public final class ReviewSession {
         sessionTotal > 0 ? Double(cardsDone) / Double(sessionTotal) : 0
     }
 
+    /// With `showsEachCardOnce`: the round's cards not answered yet, or nil
+    /// until the deck has loaded. What the Today widget and the app icon
+    /// count when the app is left mid-round.
+    public var cardsLeftInRound: Int? {
+        guard showsEachCardOnce else { return nil }
+        if isFinished { return 0 }
+        guard cardsAtStart > 0 else { return nil }
+        return max(0, cardsAtStart - sessionStats.reviewed)
+    }
+
     /// Roughly how long the cards still to come will take at this session's
     /// pace, or nil until a few answers have set one. See `ReviewPace`.
     public var estimatedSecondsLeft: Double? {

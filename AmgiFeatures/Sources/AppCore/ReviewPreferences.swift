@@ -37,10 +37,17 @@ public enum ReviewPreferences {
         public static let showTimeLeft = "review_pref_show_time_left"
         public static let problemCardLapses = "review_pref_problem_card_lapses"
         public static let handsFreeSpeed = "review_pref_hands_free_speed"
+        public static let appIconBadge = "review_pref_app_icon_badge"
     }
 
     public static var handsFreeSpeed: HandsFreeSpeed {
         UserDefaults.standard.string(forKey: Keys.handsFreeSpeed).flatMap(HandsFreeSpeed.init(rawValue:)) ?? .normal
+    }
+
+    /// What the number on the app icon counts: reviews and new cards
+    /// unless changed in Settings.
+    public static var appIconBadge: AppIconBadge {
+        UserDefaults.standard.string(forKey: Keys.appIconBadge).flatMap(AppIconBadge.init(rawValue:)) ?? .cardsLeft
     }
 
     /// A card forgotten this many times is flagged orange when it's

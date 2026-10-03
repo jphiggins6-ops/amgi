@@ -7,6 +7,7 @@
 
 import SwiftUI
 import AppCore
+import AppShared
 import Theme
 import Sharing
 import ReviewCore
@@ -40,10 +41,14 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.handsFreeSpeed))
     private var handsFreeSpeed: String = HandsFreeSpeed.normal.rawValue
 
+    @Shared(.appStorage(ReviewPreferences.Keys.appIconBadge))
+    private var appIconBadge: String = AppIconBadge.cardsLeft.rawValue
+
     var body: some View {
         SettingsPage {
             cardOrderSection
             progressSection
+            appIconSection
             ProblemCardsSection()
             handsFreeSection
             gesturesSection
@@ -82,6 +87,28 @@ struct ReviewSettingsView: View {
                 )
             }
             SettingsFootnote("Shown at the top while reviewing, worked out from how fast you've answered so far this session, with extra turns for new cards and for cards you miss. You can also turn it off from the ⋯ menu while reviewing.")
+        }
+    }
+
+    private var appIconSection: some View {
+        Group {
+            SettingsSectionHeader(title: "App Icon")
+            SettingsGroup {
+                SettingsPickerRow(
+                    title: "Number on the icon",
+                    systemImage: "app.badge",
+                    tone: .danger,
+                    selection: Binding($appIconBadge)
+                ) {
+                    ForEach(AppIconBadge.allCases) { choice in
+                        Text(verbatim: choice.title).tag(choice.rawValue)
+                    }
+                }
+            }
+            SettingsFootnote("The red number on Amgi's icon: what's left of today, as on the widget. It drops as you study and goes once today's minimum is done. When a new day starts it moves on by itself, to an estimate until you open Amgi. iPhone asks once whether Amgi may show it; if you said no, turn on Badges in the Settings app → Notifications → Amgi.")
+        }
+        .onChange(of: appIconBadge) { _, choice in
+            Task { await updateAppIconBadge(style: AppIconBadge(rawValue: choice) ?? .cardsLeft) }
         }
     }
 

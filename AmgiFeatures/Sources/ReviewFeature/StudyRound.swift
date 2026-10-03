@@ -3,6 +3,8 @@
 //  ReviewFeature
 //
 
+package import AppCore
+
 /// A round from one of the Library's study buttons: every card in its deck
 /// shown once, counted against the whole day, ending in a moment's
 /// celebration and a return to the Library rather than a summary screen.
@@ -56,6 +58,22 @@ package struct StudyRound: Equatable, Sendable {
         case .again:
             "Cards you've seen today come back to Reviews as they fall due again."
         }
+    }
+
+    /// Today's numbers with `cardsLeft` of this round still to go: what the
+    /// Today widget and the app icon show when the app is left mid-round.
+    /// Nil for an `again` round, which isn't part of today's minimum.
+    package func progress(_ today: TodaySnapshot, cardsLeft: Int) -> TodaySnapshot? {
+        var updated = today
+        switch kind {
+        case .reviews:
+            updated.reviewsLeft = min(cardsLeft, today.reviewsTotal)
+        case .newCards:
+            updated.newLeft = min(cardsLeft, today.newTotal)
+        case .again:
+            return nil
+        }
+        return updated
     }
 
     /// The day's minimum gets a seal; anything less, a tick.

@@ -74,6 +74,11 @@ import Testing
             == .newDay(estimatedReviews: 310, estimatedNew: 20))
     }
 
+    @Test func aNewDayBringsAsManyNewCardsAsToday() {
+        #expect(TodayWidgetState.at(date(11, 9), today: today(newLeft: 0), forecast: forecast(newCount: 0), calendar: calendar)
+            == .newDay(estimatedReviews: 310, estimatedNew: 20), "today's new cards are done, but the daily limit brings 20 more")
+    }
+
     @Test func nothingSavedYetIsUnknown() {
         #expect(TodayWidgetState.at(date(10, 12), today: nil, forecast: nil, calendar: calendar) == .unknown)
     }
@@ -81,6 +86,76 @@ import Testing
     @Test func theWidgetRedrawsAtTheNextRollover() {
         #expect(TodayWidgetState.nextBoundary(after: date(10, 12), rolloverHour: 4, calendar: calendar) == date(11, 4))
         #expect(TodayWidgetState.nextBoundary(after: date(11, 2), rolloverHour: 4, calendar: calendar) == date(11, 4))
+    }
+
+    // MARK: - The number on the app icon
+
+    /// All Decks, written at noon on the 10th: 310 reviews due on the 11th
+    /// and 330 on the 12th if nothing is studied, and no further forecast.
+    private func forecast(newCount: Int = 20) -> WidgetSnapshot {
+        WidgetSnapshot(
+            deckId: 0,
+            deckName: "All Decks",
+            newCount: newCount,
+            learnCount: 5,
+            reviewCount: 120,
+            reviewedToday: 180,
+            streak: 3,
+            lastSevenDays: Array(repeating: 0, count: 7),
+            snapshotDate: date(10, 12),
+            forecast: .init(
+                rolloverHour: 4,
+                dayZero: date(10, 4),
+                days: [
+                    .init(newCount: newCount, learnCount: 5, reviewCount: 120),
+                    .init(newCount: newCount, learnCount: 0, reviewCount: 310),
+                    .init(newCount: newCount, learnCount: 0, reviewCount: 330),
+                ]
+            )
+        )
+    }
+
+    @Test func theIconCountsWhatsLeftOfToday() {
+        let state = TodayWidgetState.progress(today())
+        #expect(AppIconBadge.cardsLeft.count(state) == 128)
+        #expect(AppIconBadge.reviewsLeft.count(state) == 120)
+        #expect(AppIconBadge.off.count(state) == 0)
+        #expect(AppIconBadge.cardsLeft.count(.progress(today(reviewsLeft: 0, newLeft: 0))) == 0, "done for today: no number")
+        #expect(AppIconBadge.cardsLeft.count(.unknown) == nil)
+    }
+
+    @Test func theIconMovesOnEachMorningWhileTheAppIsClosed() {
+        let plan = AppIconBadge.cardsLeft.plan(now: date(10, 12), today: today(), forecast: forecast(), calendar: calendar)
+        #expect(plan.now == 128)
+        #expect(plan.changes == [
+            AppIconBadgePlan.Change(date: date(11, 4), count: 330),
+            AppIconBadgePlan.Change(date: date(12, 4), count: 350),
+        ], "the forecast's reviews and today's 20 new cards; no change once the forecast runs out")
+    }
+
+    @Test func reviewsOnlyLeavesNewCardsOut() {
+        let plan = AppIconBadge.reviewsLeft.plan(now: date(10, 12), today: today(), forecast: forecast(), calendar: calendar)
+        #expect(plan.now == 120)
+        #expect(plan.changes.map(\.count) == [310, 330])
+    }
+
+    @Test func offClearsTheIcon() {
+        #expect(AppIconBadge.off.plan(now: date(10, 12), today: today(), forecast: forecast(), calendar: calendar)
+            == AppIconBadgePlan(now: 0, changes: []))
+    }
+
+    @Test func withoutAForecastTheIconWaitsForTheApp() {
+        let plan = AppIconBadge.cardsLeft.plan(now: date(10, 12), today: today(), forecast: nil, calendar: calendar)
+        #expect(plan.now == 128)
+        #expect(plan.changes.isEmpty)
+        #expect(AppIconBadge.cardsLeft.plan(now: date(10, 12), today: nil, forecast: nil, calendar: calendar)
+            == AppIconBadgePlan(now: nil, changes: []))
+    }
+
+    @Test func yesterdaysNumbersGiveWayToTheEstimate() {
+        let plan = AppIconBadge.cardsLeft.plan(now: date(11, 9), today: today(), forecast: forecast(), calendar: calendar)
+        #expect(plan.now == 330)
+        #expect(plan.changes == [AppIconBadgePlan.Change(date: date(12, 4), count: 350)])
     }
 
     @Test func aSnapshotRoundTripsThroughTheStore() {

@@ -14,6 +14,7 @@ import AppShared
 import AnkiClients
 package import AnkiKit
 import Dependencies
+import Foundation
 import BrowseFeature
 import TemplatesFeature
 import Sharing
@@ -54,6 +55,8 @@ package struct ReviewView: View {
 
     @Shared(.appStorage(ReviewPreferences.Keys.playAudioInSilentMode))
     private var playAudioInSilentMode: Bool = false
+
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var session: ReviewSession
     @State private var destination: ReviewDestination?
@@ -127,9 +130,25 @@ package struct ReviewView: View {
         .onChange(of: playAudioInSilentMode) { _, newValue in
             ReviewAudioSession.apply(playInSilent: newValue)
         }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background { saveRoundProgress() }
+        }
         .onDisappear {
             ReviewAudioSession.release()
             Task { await writeWidgetSnapshot() }
         }
+    }
+
+    /// Leaving the app mid-round: the Today widget and the app icon count
+    /// what's left of the round now, not what was left as it began.
+    private func saveRoundProgress() {
+        guard let round,
+              let left = session.cardsLeftInRound,
+              let today = TodaySnapshotStore.read(),
+              today.isCurrent(at: Date()),
+              let updated = round.progress(today, cardsLeft: left)
+        else { return }
+        writeTodayWidget(updated)
+        Task { await updateAppIconBadge(updated) }
     }
 }
