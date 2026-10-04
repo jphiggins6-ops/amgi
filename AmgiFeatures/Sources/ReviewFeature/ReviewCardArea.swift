@@ -22,12 +22,13 @@ import SwiftUINavigation
 
 // MARK: - Card Area
 
-/// The card region of the reviewer: render-mode chip, the flip surface, and
-/// the reveal/rating controls. Extracted from `ReviewContent` so that session
-/// mutations it doesn't read (audio-playing toggles, toast, deck counts) skip
-/// its body — otherwise every such change re-runs `CardWebView.updateUIView`
-/// and its regex HTML processing. Owns the render-mode sheet flag and the
-/// native audio player, which are only relevant here.
+/// The card region of the reviewer: the flip surface and the reveal/rating
+/// controls. Extracted from `ReviewContent` so that session mutations it
+/// doesn't read (audio-playing toggles, toast, deck counts) skip its body —
+/// otherwise every such change re-runs `CardWebView.updateUIView` and its
+/// regex HTML processing. Owns the native audio player, which is only
+/// relevant here. How the card is rendered is chosen from ⋯
+/// (`ReviewDestination.renderMode`).
 struct ReviewCardArea: View {
     let session: ReviewSession
     let openLinksExternally: Bool
@@ -45,7 +46,6 @@ struct ReviewCardArea: View {
     @Environment(\.palette) private var palette
     @Shared(.appStorage(ReaderPreferences.Keys.dictionaryScanLength))
     private var dictionaryScanLength: Int = 16
-    @State private var showRenderModeSheet = false
     @State private var nativeAudioPlayer = NativeCardAudioPlayer()
 
     private var mediaFolder: URL? { session.mediaFolder }
@@ -78,14 +78,6 @@ struct ReviewCardArea: View {
 
     private var cardContent: some View {
         VStack(spacing: 0) {
-            RenderModeChipRow(
-                isNative: isNativeMode,
-                isAuto: session.resolvedByAuto,
-                templateName: session.templateName,
-                onTap: { showRenderModeSheet = true }
-            )
-            .padding(.horizontal)
-
             cardFlipRegion
             .onChange(of: session.stopAudioRequestID) { _, _ in
                 if isNativeMode { nativeAudioPlayer.stop() }
@@ -99,7 +91,6 @@ struct ReviewCardArea: View {
                 if isNativeMode { session.updateAudioPlaying(playing) }
             }
             .onDisappear { nativeAudioPlayer.stop() }
-            .sheet(isPresented: $showRenderModeSheet) { renderModeSheet }
 
             Spacer()
 
@@ -147,7 +138,7 @@ struct ReviewCardArea: View {
     }
 
     private var keyboardActive: Bool {
-        shortcutsEnabled && !showRenderModeSheet && !session.isTypedAnswerCard
+        shortcutsEnabled && !session.isTypedAnswerCard
     }
 
     /// The reveal region. Native cards get the 3D flip (pure SwiftUI, crisp);
@@ -161,31 +152,6 @@ struct ReviewCardArea: View {
             }
         } else {
             cardSurface(isBack: session.showAnswer)
-        }
-    }
-
-    private var renderModeSheet: some View {
-        RenderModeSheet(
-            explainer: renderModeExplainer,
-            template: session.currentTemplateTarget,
-            templateName: session.templateName,
-            onChanged: { session.reresolveCurrentCard() }
-        )
-    }
-
-    private var renderModeExplainer: String {
-        switch session.resolvedMode {
-        case .native:
-            return "shown with the built-in renderer."
-        case .html:
-            let prefs = currentRenderEnginePreferences(
-                mid: session.currentNote?.mid,
-                ord: Int(session.currentCardOrdinal)
-            )
-            if (prefs.override ?? prefs.global) == .alwaysHTML {
-                return "shown with its own template, because you chose that below."
-            }
-            return "shown with its own template, because it uses formatting the built-in renderer can't show."
         }
     }
 

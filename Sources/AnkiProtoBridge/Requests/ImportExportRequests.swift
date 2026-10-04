@@ -168,3 +168,144 @@ extension Request where Response == UInt32 {
         )
     }
 }
+
+// MARK: - Text files (CSV, TSV)
+
+extension Request where Response == CsvImportMetadata {
+    /// Reads how a text file to import is laid out: its delimiter (guessed
+    /// unless given), columns and first lines, and the deck, note type and
+    /// field mapping an import would use. `notetypeId` asks for that note
+    /// type's mapping instead of the engine's choice.
+    public static func csvMetadata(
+        path: String,
+        delimiter: CsvImportMetadata.Delimiter? = nil,
+        notetypeId: NotetypeID? = nil,
+        deckId: DeckID? = nil,
+        isHTML: Bool? = nil
+    ) -> Self {
+        Self(
+            serviceId: ServiceID.importExport,
+            methodId: ImportExportMethod.getCsvMetadata,
+            encode: {
+                var proto = Anki_ImportExport_CsvMetadataRequest()
+                proto.path = path
+                if let delimiter { proto.delimiter = CsvMetadataMapping.proto(delimiter) }
+                if let notetypeId { proto.notetypeID = notetypeId.rawValue }
+                if let deckId { proto.deckID = deckId.rawValue }
+                if let isHTML { proto.isHtml = isHTML }
+                return try proto.serializedData()
+            },
+            decode: { bytes in
+                CsvMetadataMapping.metadata(try Anki_ImportExport_CsvMetadata(serializedBytes: bytes))
+            }
+        )
+    }
+}
+
+extension Request where Response == CsvImportSummary {
+    /// Imports a text file, one note per line, as `metadata` describes.
+    public static func importCsv(path: String, metadata: CsvImportMetadata) -> Self {
+        Self(
+            serviceId: ServiceID.importExport,
+            methodId: ImportExportMethod.importCsv,
+            encode: {
+                var proto = Anki_ImportExport_ImportCsvRequest()
+                proto.path = path
+                proto.metadata = CsvMetadataMapping.proto(metadata)
+                return try proto.serializedData()
+            },
+            decode: { bytes in
+                let log = try Anki_ImportExport_ImportResponse(serializedBytes: bytes).log
+                return CsvImportSummary(
+                    added: log.new.count,
+                    updated: log.updated.count,
+                    duplicates: log.duplicate.count,
+                    conflicting: log.conflicting.count,
+                    firstFieldMatch: log.firstFieldMatch.count,
+                    missingNotetype: log.missingNotetype.count,
+                    missingDeck: log.missingDeck.count,
+                    emptyFirstField: log.emptyFirstField.count,
+                    foundNotes: Int(log.foundNotes)
+                )
+            }
+        )
+    }
+}
+
+/// Between the engine's CSV metadata and AnkiKit's mirror of it.
+enum CsvMetadataMapping {
+    static func metadata(_ proto: Anki_ImportExport_CsvMetadata) -> CsvImportMetadata {
+        let deck: CsvImportMetadata.DeckSource? = switch proto.deck {
+        case .deckID(let id)?: .existing(DeckID(id))
+        case .deckColumn(let column)?: .column(Int(column))
+        case .deckName(let name)?: .new(name)
+        case nil: nil
+        }
+        let notetype: CsvImportMetadata.NotetypeSource? = switch proto.notetype {
+        case .globalNotetype(let mapped)?:
+            .global(id: NotetypeID(mapped.id), fieldColumns: mapped.fieldColumns.map { Int($0) })
+        case .notetypeColumn(let column)?: .column(Int(column))
+        case nil: nil
+        }
+        return CsvImportMetadata(
+            delimiter: delimiter(proto.delimiter),
+            isHTML: proto.isHtml,
+            globalTags: proto.globalTags,
+            updatedTags: proto.updatedTags,
+            columnLabels: proto.columnLabels,
+            deck: deck,
+            notetype: notetype,
+            tagsColumn: Int(proto.tagsColumn),
+            guidColumn: Int(proto.guidColumn),
+            forcesDelimiter: proto.forceDelimiter,
+            forcesIsHTML: proto.forceIsHtml,
+            preview: proto.preview.map(\.vals),
+            duplicates: CsvImportMetadata.Duplicates(rawValue: proto.dupeResolution.rawValue) ?? .update,
+            matchScope: CsvImportMetadata.MatchScope(rawValue: proto.matchScope.rawValue) ?? .notetype
+        )
+    }
+
+    static func proto(_ metadata: CsvImportMetadata) -> Anki_ImportExport_CsvMetadata {
+        var proto = Anki_ImportExport_CsvMetadata()
+        proto.delimiter = Self.proto(metadata.delimiter)
+        proto.isHtml = metadata.isHTML
+        proto.globalTags = metadata.globalTags
+        proto.updatedTags = metadata.updatedTags
+        proto.columnLabels = metadata.columnLabels
+        switch metadata.deck {
+        case .existing(let id)?: proto.deckID = id.rawValue
+        case .column(let column)?: proto.deckColumn = UInt32(clamping: column)
+        case .new(let name)?: proto.deckName = name
+        case nil: break
+        }
+        switch metadata.notetype {
+        case .global(let id, let fieldColumns)?:
+            var mapped = Anki_ImportExport_CsvMetadata.MappedNotetype()
+            mapped.id = id.rawValue
+            mapped.fieldColumns = fieldColumns.map { UInt32(clamping: $0) }
+            proto.globalNotetype = mapped
+        case .column(let column)?: proto.notetypeColumn = UInt32(clamping: column)
+        case nil: break
+        }
+        proto.tagsColumn = UInt32(clamping: metadata.tagsColumn)
+        proto.guidColumn = UInt32(clamping: metadata.guidColumn)
+        proto.forceDelimiter = metadata.forcesDelimiter
+        proto.forceIsHtml = metadata.forcesIsHTML
+        proto.preview = metadata.preview.map { row in
+            var list = Anki_Generic_StringList()
+            list.vals = row
+            return list
+        }
+        proto.dupeResolution = Anki_ImportExport_CsvMetadata.DupeResolution(rawValue: metadata.duplicates.rawValue) ?? .update
+        proto.matchScope = Anki_ImportExport_CsvMetadata.MatchScope(rawValue: metadata.matchScope.rawValue) ?? .notetype
+        return proto
+    }
+
+    static func delimiter(_ proto: Anki_ImportExport_CsvMetadata.Delimiter) -> CsvImportMetadata.Delimiter {
+        CsvImportMetadata.Delimiter(rawValue: proto.rawValue) ?? .tab
+    }
+
+    static func proto(_ delimiter: CsvImportMetadata.Delimiter) -> Anki_ImportExport_CsvMetadata.Delimiter {
+        Anki_ImportExport_CsvMetadata.Delimiter(rawValue: delimiter.rawValue) ?? .tab
+    }
+}

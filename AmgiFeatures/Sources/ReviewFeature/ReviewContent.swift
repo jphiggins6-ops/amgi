@@ -186,6 +186,9 @@ struct ReviewContent: View {
             .sheet(item: $destination.explain) { card in
                 ExplainSheet(card: card)
             }
+            .sheet(isPresented: Binding($destination.renderMode)) {
+                RenderModeSheet(session: session)
+            }
             .sheet(item: $destination.captureMnemonic) { note in
                 MnemonicCaptureSheet(note: note) {
                     mnemonicSavedCount += 1
@@ -544,6 +547,14 @@ private struct CardActionsMenu: View {
                 } label: {
                     Label(timeLeftToggleTitle, systemImage: "timer")
                 }
+
+                Button {
+                    destination = .renderMode
+                } label: {
+                    Label("Card Rendering", systemImage: "doc.richtext")
+                    Text(verbatim: RenderModeSheet.summary(for: session))
+                }
+                .disabled(session.currentCardId == nil)
             }
 
             if let cardId = session.currentCardId {

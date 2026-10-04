@@ -675,6 +675,31 @@ import AnkiServices
         }
     }
 
+    // MARK: - A gap above the Extra field
+
+    @Test func theExtraFieldIsMarkedWhereItBegins() {
+        let back = #"The <span class="cloze">heart</span> pumps blood<br>"# + "\nFour chambers"
+        let marked = ExtraFieldMarker.marking(
+            back,
+            fieldNames: ["Text", "Back Extra"],
+            fieldValues: ["The {{c1::heart}} pumps blood", "Four chambers"]
+        )
+        #expect(marked == #"The <span class="cloze">heart</span> pumps blood<br>"# + "\n" + ExtraFieldMarker.html + "Four chambers")
+    }
+
+    @Test func anExtraInATagOrAScriptIsPassedOverForTheOneOnThePage() {
+        let back = #"<div data-x="Note"></div><script>var e = "Note";</script>Text<br><div id="extra">Note</div>"#
+        let marked = ExtraFieldMarker.marking(back, fieldNames: ["Text", "Extra"], fieldValues: ["Text", "Note"])
+        #expect(marked == #"<div data-x="Note"></div><script>var e = "Note";</script>Text<br><div id="extra">"# + ExtraFieldMarker.html + #"Note</div>"#)
+    }
+
+    @Test func withoutAnExtraOnThePageNothingIsMarked() {
+        let back = "Front<hr id=answer>Back"
+        #expect(ExtraFieldMarker.marking(back, fieldNames: ["Front", "Back"], fieldValues: ["Front", "Back"]) == back, "no Extra field")
+        #expect(ExtraFieldMarker.marking(back, fieldNames: ["Text", "Extra"], fieldValues: ["Front", ""]) == back, "an empty Extra")
+        #expect(ExtraFieldMarker.marking(back, fieldNames: ["Text", "Extra"], fieldValues: ["Front", "Not shown"]) == back, "not on the page")
+    }
+
     // MARK: - Problem cards
 
     private static func reviewCard(lapses: Int32, flags: Int32 = 0, type: Int16 = 2) -> CardRecord {

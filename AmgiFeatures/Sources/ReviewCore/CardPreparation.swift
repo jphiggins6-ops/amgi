@@ -103,8 +103,8 @@ func prepareCard(
     // fetch failure only costs the chip-row label.
     var fetchedNotetype: Notetype?
     var templateName: String?
+    var notetype: Notetype?
     if let mid = note?.mid {
-        let notetype: Notetype?
         if let cached = notetypeCache[mid] {
             notetype = cached
         } else {
@@ -142,10 +142,17 @@ func prepareCard(
             ) ?? "engine preference (global: \(prefs.global.rawValue), override: \(prefs.override?.rawValue ?? "none"))"
             Log.review.debug("card \(queued.card.id.rawValue) → HTML: \(issue)")
         }
+        // Marked after the render mode is settled: the marker is for the
+        // card page, and native rendering parses the HTML as rendered.
+        let backHTML = ExtraFieldMarker.marking(
+            rendered.backHTML,
+            fieldNames: notetype?.fields.map(\.name) ?? [],
+            fieldValues: note?.flds.components(separatedBy: "\u{1f}") ?? []
+        )
         return PreparedCard(
             note: note,
             renderedFrontHTML: rendered.frontHTML,
-            renderedBackHTML: rendered.backHTML,
+            renderedBackHTML: backHTML,
             cardCSS: rendered.cardCSS,
             typedAnswerState: typedState,
             frontHTML: strippingTypedAnswerPlaceholders(from: rendered.frontHTML),

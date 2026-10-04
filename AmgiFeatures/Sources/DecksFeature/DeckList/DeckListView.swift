@@ -202,7 +202,7 @@ package struct DeckListView: View {
                     Label("Mnemonics…", systemImage: "sparkles")
                 }
                 Button(action: onImport) {
-                    Label("Import Deck…", systemImage: "square.and.arrow.down")
+                    Label("Import Deck or Text File…", systemImage: "square.and.arrow.down")
                 }
                 Divider()
                 Button(action: onOpenSettings) {

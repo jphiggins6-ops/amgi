@@ -33,7 +33,60 @@ extension CardRenderEngine {
 /// R11 render-mode sheet: global engine radio (Auto / Native / HTML), a
 /// "This card" explainer, and a per-template override row. Writes go to
 /// appStorage; `onChanged` lets the reviewer re-resolve the current card.
+/// Opened from the reviewer's ⋯ menu.
 struct RenderModeSheet: View {
+    /// The sheet for the session's current card.
+    init(session: ReviewSession) {
+        self.init(
+            explainer: Self.explainer(for: session),
+            template: session.currentTemplateTarget,
+            templateName: session.templateName,
+            onChanged: { session.reresolveCurrentCard() }
+        )
+    }
+
+    init(
+        explainer: String,
+        template: ReviewSession.TemplateTarget?,
+        templateName: String?,
+        onChanged: @escaping () -> Void
+    ) {
+        self.explainer = explainer
+        self.template = template
+        self.templateName = templateName
+        self.onChanged = onChanged
+    }
+
+    /// Why the current card is drawn the way it is.
+    static func explainer(for session: ReviewSession) -> String {
+        switch session.resolvedMode {
+        case .native:
+            return "shown with the built-in renderer."
+        case .html:
+            let prefs = currentRenderEnginePreferences(
+                mid: session.currentNote?.mid,
+                ord: Int(session.currentCardOrdinal)
+            )
+            if (prefs.override ?? prefs.global) == .alwaysHTML {
+                return "shown with its own template, because you chose that below."
+            }
+            return "shown with its own template, because it uses formatting the built-in renderer can't show."
+        }
+    }
+
+    /// One line for the ⋯ menu: "HTML · auto · Cloze".
+    static func summary(for session: ReviewSession) -> String {
+        var parts: [String] = []
+        if case .native = session.resolvedMode {
+            parts.append("Native")
+        } else {
+            parts.append("HTML")
+        }
+        if session.resolvedByAuto { parts.append("auto") }
+        if let name = session.templateName, !name.isEmpty { parts.append(name) }
+        return parts.joined(separator: " · ")
+    }
+
     let explainer: String
     let template: ReviewSession.TemplateTarget?
     let templateName: String?

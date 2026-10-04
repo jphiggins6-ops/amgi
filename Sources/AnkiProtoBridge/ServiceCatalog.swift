@@ -107,6 +107,8 @@ enum ImportExportMethod {
     static let exportCollectionPackage: UInt32 = 1
     static let importAnkiPackage: UInt32 = 2
     static let exportAnkiPackage: UInt32 = 4
+    static let getCsvMetadata: UInt32 = 5
+    static let importCsv: UInt32 = 6
 }
 
 enum NotesMethod {

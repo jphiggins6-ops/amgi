@@ -33,6 +33,20 @@ public struct ImportExportService: Sendable {
     /// options (merge notetypes, update notes/notetypes if newer). Returns
     /// the import log summary string.
     public var importApkgForMerge: @Sendable (_ path: String) throws -> String
+
+    /// How a text file to import is laid out, and how the engine would
+    /// import it (`Request.csvMetadata`). Each option, when given, replaces
+    /// the engine's guess.
+    public var csvMetadata: @Sendable (
+        _ path: String,
+        _ delimiter: CsvImportMetadata.Delimiter?,
+        _ notetypeId: NotetypeID?,
+        _ deckId: DeckID?,
+        _ isHTML: Bool?
+    ) throws -> CsvImportMetadata
+
+    /// Imports a text file, one note per line, as `metadata` describes.
+    public var importCsv: @Sendable (_ path: String, _ metadata: CsvImportMetadata) throws -> CsvImportSummary
 }
 
 extension ImportExportService: DependencyKey {
@@ -64,6 +78,18 @@ extension ImportExportService: DependencyKey {
             importApkgForMerge: { path in
                 let log = try backend.invoke(.importAnkiPackageForMerge(path: path))
                 return "Merged: \(log.newCount) new, \(log.updatedCount) updated, \(log.duplicateCount) duplicates"
+            },
+            csvMetadata: { path, delimiter, notetypeId, deckId, isHTML in
+                try backend.invoke(.csvMetadata(
+                    path: path,
+                    delimiter: delimiter,
+                    notetypeId: notetypeId,
+                    deckId: deckId,
+                    isHTML: isHTML
+                ))
+            },
+            importCsv: { path, metadata in
+                try backend.invoke(.importCsv(path: path, metadata: metadata))
             }
         )
     }()

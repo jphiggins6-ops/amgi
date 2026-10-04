@@ -29,6 +29,10 @@ __AMGI_BASE_TAG__
         background-attachment: fixed;
     }
     body.amgi-centered { display: flex; align-items: center; justify-content: center; min-height: calc(100vh - 40px); }
+    /* The answer side starts where the question was (amgiUpdateQA); what it
+       adds runs on below, and the page scrolls if it has to. */
+    body.amgi-anchored { display: block; }
+    .amgi-extra-gap { display: block; width: 100%; }
     .card-frame {
         width: 100%; box-sizing: border-box;
         padding-bottom: var(--amgi-card-padding-bottom, 0px);
@@ -154,8 +158,74 @@ function amgiApplyCardState(state) {
     var qa = document.getElementById('qa');
     document.body.className = s.bodyClass || document.body.className;
     document.body.style.setProperty('--amgi-body-padding-bottom', (s.bodyPaddingBottom || 16) + 'px');
-    document.body.classList.toggle('amgi-centered', !s.alignTop);
-    if (qa) qa.style.setProperty('--amgi-card-padding-bottom', (s.cardPaddingBottom || 0) + 'px');
+    var anchored = !!s.isAnswerSide && window.__amgiAnchorTop != null;
+    document.body.classList.toggle('amgi-centered', !s.alignTop && !anchored);
+    document.body.classList.toggle('amgi-anchored', anchored);
+    if (qa) {
+        qa.style.setProperty('--amgi-card-padding-bottom', (s.cardPaddingBottom || 0) + 'px');
+        if (!anchored) qa.style.paddingTop = '';
+    }
+}
+
+// ── Keeping the text in place on the flip ────────────────────────────
+// A question is centred on the screen. Centring the answer too would move
+// the same text up by half of whatever the answer adds, so for a cloze
+// with a long Extra the eye has to hunt for the line it was reading. The
+// answer starts where the question was instead: its top is pinned to the
+// question's, what it adds runs on below, and the page scrolls if needed.
+window.__amgiAnchorTop = null;
+window.__amgiAnchorScroll = 0;
+
+/// Records where the question sits, just before the answer replaces it.
+function amgiRecordAnchor(qa) {
+    var shown = amgiCardState();
+    var hasContent = !!(qa.textContent.trim() || qa.querySelector('img, svg, canvas, video'));
+    if (!shown.renderedAt || shown.isAnswerSide || !hasContent) return;
+    window.__amgiAnchorTop = qa.getBoundingClientRect().top + window.scrollY;
+    window.__amgiAnchorScroll = window.scrollY;
+}
+
+/// Pins the answer's top to where the question's was.
+function amgiApplyAnchor(qa) {
+    if (window.__amgiAnchorTop == null || !document.body.classList.contains('amgi-anchored')) return;
+    qa.style.paddingTop = '0px';
+    var top = qa.getBoundingClientRect().top + window.scrollY;
+    qa.style.paddingTop = Math.max(0, window.__amgiAnchorTop - top) + 'px';
+    window.scrollTo(0, window.__amgiAnchorScroll || 0);
+}
+
+// ── A gap above the Extra field ──────────────────────────────────────
+// The app marks where a note's Extra field begins on the answer side
+// (span.amgi-extra-start, ExtraFieldMarker). When the Extra sits right
+// under the text above with no blank line between, a spacer of about a
+// line's height opens one up. Already spaced templates are left alone.
+function amgiVisibleRects(range) {
+    return Array.from(range.getClientRects()).filter(function(r) { return r.width > 0 && r.height > 0; });
+}
+
+function amgiEnsureExtraGap(qa) {
+    var marker = qa.querySelector('.amgi-extra-start');
+    if (!marker || !marker.parentNode) return;
+    var before = document.createRange();
+    before.setStart(qa, 0);
+    before.setEndBefore(marker);
+    var after = document.createRange();
+    after.setStartAfter(marker);
+    after.setEnd(qa, qa.childNodes.length);
+    var above = amgiVisibleRects(before);
+    var below = amgiVisibleRects(after);
+    if (!above.length || !below.length) return;
+    var bottom = Math.max.apply(null, above.map(function(r) { return r.bottom; }));
+    var top = Math.min.apply(null, below.map(function(r) { return r.top; }));
+    var style = window.getComputedStyle(marker.parentNode);
+    var line = parseFloat(style.lineHeight);
+    if (!(line > 0)) line = (parseFloat(style.fontSize) || 18) * 1.5;
+    var gap = top - bottom;
+    if (gap >= line * 0.5) return;
+    var spacer = document.createElement('div');
+    spacer.className = 'amgi-extra-gap';
+    spacer.style.height = Math.ceil(line - Math.max(gap, 0)) + 'px';
+    marker.parentNode.insertBefore(spacer, marker);
 }
 
 // ===== Lookup (tap → amgiLookupText) =====
@@ -1047,6 +1117,14 @@ async function amgiUpdateQA(html, state, onupdate, onshown) {
 
     try {
         await preloadPromise;
+        // The question's place, measured while it's still on screen; a new
+        // question forgets the last one's.
+        if (state && state.isAnswerSide) {
+            amgiRecordAnchor(qa);
+        } else {
+            window.__amgiAnchorTop = null;
+            window.__amgiAnchorScroll = 0;
+        }
         // Keep the previous card visible while resources warm, and only
         // hide right before swapping the DOM to avoid blank-frame flashes.
         qa.style.transition = 'none';
@@ -1056,6 +1134,7 @@ async function amgiUpdateQA(html, state, onupdate, onshown) {
         try { await amgiSetInnerHTML(qa, normalizedHTML); }
         catch(e) { qa.innerHTML = '<div>Error: ' + String(e).replace(/\n/g,'<br>') + '</div>'; }
 
+        amgiApplyAnchor(qa);
         await amgiRunHooks(window.onUpdateHook);
 
         if (needsMathJax) {
@@ -1104,6 +1183,7 @@ async function amgiUpdateQA(html, state, onupdate, onshown) {
         }
 
         amgiSetupImageOcclusion();
+        if (state && state.isAnswerSide) amgiEnsureExtraGap(qa);
         await amgiRunHooks(window.onShownHook);
     } finally {
         // Avoid a forced fade-in on every flip/next-card update; it reads
@@ -1183,10 +1263,14 @@ function _showAnswer(html, bodyclass, autoplay, replayMode, alignTop, bodyPaddin
                 prefetchHTML: ''
             },
             function() {
-                // scroll to answer after images load
+                // The answer starts where the question was (amgiApplyAnchor),
+                // so scroll to the answer line, once images have loaded, only
+                // when it's below the bottom of the screen.
                 amgiAllImagesLoaded().then(function() {
                     var marker = document.getElementById('answer');
-                    if (marker) marker.scrollIntoView();
+                    if (marker && marker.getBoundingClientRect().top > window.innerHeight - 48) {
+                        marker.scrollIntoView();
+                    }
                 });
             },
             function() {

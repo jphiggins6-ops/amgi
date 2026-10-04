@@ -32,6 +32,9 @@ enum ReviewDestination {
     case captureMnemonic(NoteRecord)
     /// "Explain": the AI's take on why the answer is right.
     case explain(CardExplanation.Card)
+    /// How the card is drawn: the built-in renderer or its own template.
+    /// Opened from ⋯ (it used to be a bar above every card).
+    case renderMode
 }
 
 extension Optional where Wrapped == ReviewDestination {
