@@ -9,6 +9,7 @@ import SwiftUI
 package import AmgiCardWeb
 import Theme
 import AppCore
+import AnkiKit
 import Sharing
 import ReviewCore
 
