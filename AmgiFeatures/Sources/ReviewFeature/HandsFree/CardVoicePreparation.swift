@@ -5,7 +5,7 @@
 
 #if canImport(UIKit)
 import Foundation
-import Observation
+public import Observation
 import UIKit
 import AnkiKit
 import AppCore
