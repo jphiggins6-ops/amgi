@@ -222,6 +222,12 @@ private final class PlayerDelegate: NSObject, AVAudioPlayerDelegate, @unchecked 
 
 /// Listens through the microphone and passes on what it hears as text, for
 /// the voice commands. Recognition happens on the phone when it can.
+///
+/// The microphone stays on from `open()` to `close()`, the whole of
+/// hands-free, and `start()` and `stop()` only begin and end a recognition
+/// of what it hears. iPhone lets an app keep the microphone it has when the
+/// screen locks, but not turn it on then, so switching it off between
+/// cards ended hands-free the first time the screen locked.
 @MainActor
 final class VoiceListener {
     enum Failure: LocalizedError {
@@ -238,15 +244,53 @@ final class VoiceListener {
 
     private let recognizer = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
     private let engine = AVAudioEngine()
+    /// Where the microphone's sound goes: the recognition under way, if any.
+    private let route = AudioRoute()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var tapInstalled = false
 
-    /// What's heard so far, as it's recognized, until recognition stops on
-    /// its own (it does after a while) or `stop()` is called.
+    /// Turns the microphone on, unless it's on.
+    func open() throws {
+        guard !engine.isRunning else { return }
+        // Off since it was opened (a call, or headphones coming out): the
+        // sound may come in another format now.
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
+        let input = engine.inputNode
+        let format = input.outputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0 else { throw Failure.noMicrophone }
+        input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.feeding(route))
+        tapInstalled = true
+        engine.prepare()
+        do {
+            try engine.start()
+        } catch {
+            close()
+            throw error
+        }
+    }
+
+    /// Turns the microphone off, ending any recognition.
+    func close() {
+        stop()
+        if engine.isRunning {
+            engine.stop()
+        }
+        if tapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            tapInstalled = false
+        }
+    }
+
+    /// What's heard from now on, as it's recognized, until recognition
+    /// stops on its own (it does after a while) or `stop()` is called.
     func start() throws -> AsyncThrowingStream<String, any Error> {
         stop()
         guard let recognizer, recognizer.isAvailable else { throw Failure.unavailable }
+        try open()
 
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
@@ -255,19 +299,7 @@ final class VoiceListener {
         if recognizer.supportsOnDeviceRecognition {
             request.requiresOnDeviceRecognition = true
         }
-
-        let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else { throw Failure.noMicrophone }
-        input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.feeding(RequestBox(request)))
-        tapInstalled = true
-        engine.prepare()
-        do {
-            try engine.start()
-        } catch {
-            stop()
-            throw error
-        }
+        route.send(to: request)
 
         let (stream, continuation) = AsyncThrowingStream<String, any Error>.makeStream()
         task = recognizer.recognitionTask(with: request, resultHandler: Self.reporting(to: continuation))
@@ -275,22 +307,18 @@ final class VoiceListener {
         return stream
     }
 
+    /// Ends the recognition under way; the microphone stays on.
     func stop() {
-        if engine.isRunning {
-            engine.stop()
-        }
-        if tapInstalled {
-            engine.inputNode.removeTap(onBus: 0)
-            tapInstalled = false
-        }
+        // First, so no more sound goes to the request once it's ended.
+        route.send(to: nil)
         request?.endAudio()
         task?.cancel()
         request = nil
         task = nil
     }
 
-    nonisolated private static func feeding(_ box: RequestBox) -> AVAudioNodeTapBlock {
-        { buffer, _ in box.request.append(buffer) }
+    nonisolated private static func feeding(_ route: AudioRoute) -> AVAudioNodeTapBlock {
+        { buffer, _ in route.append(buffer) }
     }
 
     nonisolated private static func reporting(
@@ -306,13 +334,19 @@ final class VoiceListener {
     }
 }
 
-/// The recognition request, for the audio tap's thread. Appending audio to
-/// it from there is what it's made for.
-private final class RequestBox: @unchecked Sendable {
-    let request: SFSpeechAudioBufferRecognitionRequest
+/// The recognition request the microphone's sound goes to, for the audio
+/// tap's thread, which appends to it while the main actor changes it.
+private final class AudioRoute: @unchecked Sendable {
+    private let lock = NSLock()
+    private var request: SFSpeechAudioBufferRecognitionRequest?
 
-    init(_ request: SFSpeechAudioBufferRecognitionRequest) {
-        self.request = request
+    func send(to request: SFSpeechAudioBufferRecognitionRequest?) {
+        lock.withLock { self.request = request }
+    }
+
+    /// Under the lock, so a request that's been let go gets nothing more.
+    func append(_ buffer: AVAudioPCMBuffer) {
+        lock.withLock { request?.append(buffer) }
     }
 }
 

@@ -38,6 +38,7 @@ public enum ReviewPreferences {
         public static let problemCardLapses = "review_pref_problem_card_lapses"
         public static let handsFreeSpeed = "review_pref_hands_free_speed"
         public static let handsFreeVoice = "review_pref_hands_free_voice"
+        public static let handsFreeKeepsScreenOn = "review_pref_hands_free_keeps_screen_on"
         /// The switch that came before `aiVoiceCards`, read to carry over
         /// a choice of no AI voice.
         public static let aiVoiceForNewCards = "review_pref_ai_voice_for_new_cards"
@@ -45,12 +46,20 @@ public enum ReviewPreferences {
         public static let aiVoice = "review_pref_ai_voice_gemini"
         public static let aiVoiceRewrites = "review_pref_ai_voice_rewrites"
         public static let aiVoiceSince = "review_pref_ai_voice_since"
+        /// The cards queued for the AI voice, soonest due first, by id.
+        public static let aiVoiceQueue = "review_pref_ai_voice_queue"
         public static let appIconBadge = "review_pref_app_icon_badge"
         public static let appIconTurnsGreen = "review_pref_app_icon_turns_green"
     }
 
     public static var handsFreeSpeed: HandsFreeSpeed {
         UserDefaults.standard.string(forKey: Keys.handsFreeSpeed).flatMap(HandsFreeSpeed.init(rawValue:)) ?? .normal
+    }
+
+    /// Whether the screen stays on while hands-free mode runs. On unless
+    /// switched off in Settings.
+    public static var handsFreeKeepsScreenOn: Bool {
+        UserDefaults.standard.object(forKey: Keys.handsFreeKeepsScreenOn) as? Bool ?? true
     }
 
     /// The iPhone voice picked for hands-free mode, by identifier; nil for

@@ -51,6 +51,8 @@ final class AIVoiceRecorder {
     private var scripts: [URL: CardScript.Lines] = [:]
     /// Why the last card couldn't be done, until one is.
     private(set) var problem: String?
+    /// The error behind `problem`.
+    private(set) var lastError: (any Error)?
 
     /// While Google's limit for the key holds, for the minute or the day:
     /// no new work starts, so cards go straight to the iPhone voice. Shared
@@ -58,11 +60,24 @@ final class AIVoiceRecorder {
     private(set) static var pause: (until: Date, daily: Bool, reason: String)?
 
     static var isPaused: Bool {
-        guard let pause else { return false }
-        if pause.until > Date() { return true }
-        Self.pause = nil
-        return false
+        if let pause {
+            if pause.until > Date() { return true }
+            Self.pause = nil
+        }
+        // A daily limit outlasts the app: it holds until Google's day ends.
+        let defaults = UserDefaults.standard
+        let until = defaults.double(forKey: pausedUntilKey)
+        guard until > Date().timeIntervalSince1970 else { return false }
+        pause = (
+            until: Date(timeIntervalSince1970: until),
+            daily: true,
+            reason: defaults.string(forKey: pauseReasonKey) ?? "Google’s daily limit for the Gemini voice is reached."
+        )
+        return true
     }
+
+    private static let pausedUntilKey = "ai_voice_paused_until"
+    private static let pauseReasonKey = "ai_voice_pause_reason"
 
     init() {
         @Dependency(\.cardVoice) var client
@@ -138,8 +153,10 @@ final class AIVoiceRecorder {
                     try CardVoiceRecordings.save(wav: wav, of: text, voice: voice)
                 }
                 problem = nil
+                lastError = nil
             } catch {
                 problem = error.localizedDescription
+                lastError = error
                 Self.pauseIfLimited(error)
                 Log.review.error("The AI voice couldn't do a card: \(error.localizedDescription)")
             }
@@ -161,6 +178,10 @@ final class AIVoiceRecorder {
             }
         }
         pause = (until: until, daily: daily, reason: error.localizedDescription)
+        if daily {
+            UserDefaults.standard.set(until.timeIntervalSince1970, forKey: pausedUntilKey)
+            UserDefaults.standard.set(error.localizedDescription, forKey: pauseReasonKey)
+        }
     }
 
     /// The recording of a side, waiting up to `limit` for the card's work

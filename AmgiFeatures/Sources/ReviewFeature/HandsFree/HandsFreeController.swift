@@ -21,8 +21,9 @@ import ReviewCore
 /// card starts.
 /// "Repeat" reads the side again, "undo" takes the last answer back, and
 /// "stop" ends hands-free. Taps on the screen still work, and the reading
-/// follows them. It carries on with the screen locked (the app's background
-/// audio mode).
+/// follows them. The screen stays on while it runs, unless that's switched
+/// off in Settings, and it carries on with the screen locked too (the app's
+/// background audio mode, with the microphone kept on throughout).
 ///
 /// The cards chosen in Settings (`ReviewPreferences.aiVoiceCards`: all of
 /// them, or those added since the AI voice started) are read in the AI
@@ -106,9 +107,11 @@ final class HandsFreeController {
         currentRace?.finish(.cancelled)
         currentRace = nil
         voice?.speaker.stop()
-        voice?.listener.stop()
+        voice?.listener.close()
         if phase != .off {
             HandsFreeAudioSession.deactivate()
+            ScreenAwake.keep(.handsFree, false)
+            CardVoicePreparation.shared.handsFreeStopped()
         }
         phase = .off
     }
@@ -137,10 +140,16 @@ final class HandsFreeController {
         guard !Task.isCancelled else { return }
         do {
             try HandsFreeAudioSession.activate()
+            // On now, while the app is in front, and until hands-free ends:
+            // see `VoiceListener`.
+            try listener.open()
         } catch {
             end(problem: "The microphone couldn't start: \(error.localizedDescription)")
             return
         }
+        ScreenAwake.keep(.handsFree, ReviewPreferences.handsFreeKeepsScreenOn)
+        // Cards queued for the AI voice wait: this reads, and readies, its own.
+        CardVoicePreparation.shared.handsFreeStarted()
         speaker.speed = ReviewPreferences.handsFreeSpeed
         speaker.preferredVoice = ReviewPreferences.handsFreeVoice
         let aiCards = ReviewPreferences.aiVoiceCards

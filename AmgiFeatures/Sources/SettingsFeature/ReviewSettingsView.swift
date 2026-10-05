@@ -46,6 +46,9 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.handsFreeVoice))
     private var handsFreeVoice: String = ""
 
+    @Shared(.appStorage(ReviewPreferences.Keys.handsFreeKeepsScreenOn))
+    private var handsFreeKeepsScreenOn: Bool = true
+
     @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceCards))
     private var aiVoiceCards: String = ReviewPreferences.aiVoiceCards.rawValue
 
@@ -169,6 +172,13 @@ struct ReviewSettingsView: View {
                     }
                 }
                 SettingsSeparator()
+                SettingsToggleRow(
+                    title: "Keep the screen on",
+                    systemImage: "sun.max",
+                    tone: .learning,
+                    isOn: Binding($handsFreeKeepsScreenOn)
+                )
+                SettingsSeparator()
                 SettingsPickerRow(
                     title: "iPhone voice",
                     systemImage: "waveform",
@@ -199,7 +209,7 @@ struct ReviewSettingsView: View {
                     $handsFreeVoice.withLock { $0 = "" }
                 }
             }
-            SettingsFootnote("Start it from ⋯ while reviewing. Each question is read aloud: say “show” to turn the card over and hear just the answer (the Extra isn’t read), then “again”, “hard”, “good” or “easy”. Rate straight away and the card is rated without the answer being read. “Repeat”, “undo” and “stop” work any time. With headphones you can talk over the reading; out of the speaker, wait for it to finish. It keeps going with the screen locked.")
+            SettingsFootnote("Start it from ⋯ while reviewing. Each question is read aloud: say “show” to turn the card over and hear just the answer (the Extra isn’t read), then “again”, “hard”, “good” or “easy”. Rate straight away and the card is rated without the answer being read. “Repeat”, “undo” and “stop” work any time. With headphones you can talk over the reading; out of the speaker, wait for it to finish. The screen stays on while it runs, unless you switch that off; it also keeps going if you lock the phone.")
             SettingsFootnote("The iPhone voice reads every card the AI voice doesn’t, for free. For one that sounds far more natural, download a Premium or Enhanced voice, such as Ava or Zoe, in the Settings app: Accessibility → Read & Speak → Voices → English. Amgi uses the best one you have unless you pick one here.")
         }
     }
@@ -213,8 +223,10 @@ struct ReviewSettingsView: View {
                     isPresented: $confirmsPreparing,
                     titleVisibility: .visible
                 ) {
-                    Button(preparationButton) { preparation.start() }
-                    Button("Cancel", role: .cancel) { preparation.cancel() }
+                    ForEach(batchChoices, id: \.self) { count in
+                        Button(batchTitle(count)) { preparation.queueBatch(count) }
+                    }
+                    Button("Cancel", role: .cancel) { preparation.cancelChoosing() }
                 } message: {
                     Text(preparationMessage)
                 }
@@ -297,9 +309,9 @@ struct ReviewSettingsView: View {
             }
             .onChange(of: preparation.phase) { _, phase in
                 switch phase {
-                case .confirming:
+                case .choosing:
                     confirmsPreparing = true
-                case .finished:
+                case .finished, .waiting:
                     recordingsSize = CardVoiceRecordings.size()
                 case .idle, .checking, .preparing:
                     break
@@ -321,10 +333,15 @@ struct ReviewSettingsView: View {
             if let sampleProblem {
                 SettingsFootnote(sampleProblem)
             }
-            if case .finished(let outcome) = preparation.phase {
+            switch preparation.phase {
+            case .finished(let outcome):
                 SettingsFootnote(outcome)
+            case .waiting(_, let reason):
+                SettingsFootnote(reason)
+            case .idle, .checking, .choosing, .preparing:
+                EmptyView()
             }
-            SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or with Prepare Cards Now, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Google lets the Gemini voice make about 100 recordings a day on most accounts, roughly 50 cards; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it.")
+            SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or ahead of time with Prepare Cards, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Prepare Cards does the cards due soonest first, a batch at a time. Google lets the Gemini voice make about 100 recordings a day on most accounts, roughly 50 cards; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it.")
         }
     }
 
@@ -334,12 +351,12 @@ struct ReviewSettingsView: View {
 
     private var preparation: CardVoicePreparation { .shared }
 
-    /// Prepare Cards Now, or how far it's got and Stop.
+    /// Prepare Cards, how far it's got and Stop, or what's queued.
     @ViewBuilder
     private var preparationRows: some View {
         switch preparation.phase {
         case .checking:
-            SettingsButtonRow(title: "Checking Your Cards…", systemImage: "rectangle.stack", tone: .accent, isBusy: true) {}
+            SettingsButtonRow(title: "Finding the Cards Due Soonest…", systemImage: "rectangle.stack", tone: .accent, isBusy: true) {}
                 .disabled(true)
             SettingsSeparator()
             stopPreparingRow
@@ -348,12 +365,29 @@ struct ReviewSettingsView: View {
                 .disabled(true)
             SettingsSeparator()
             stopPreparingRow
-        case .idle, .confirming, .finished:
-            SettingsButtonRow(title: "Prepare Cards Now", systemImage: "rectangle.stack.badge.plus", tone: .accent) {
-                preparation.check()
+        case .waiting(let queued, _):
+            SettingsValueRow(title: "Queued", value: "\(queued) cards", systemImage: "clock", tone: .accent)
+            SettingsSeparator()
+            SettingsButtonRow(title: "Carry On Now", systemImage: "play.circle", tone: .accent) {
+                preparation.carryOn()
             }
             .disabled(aiVoiceIsOff)
+            SettingsSeparator()
+            prepareCardsRow
+            SettingsSeparator()
+            SettingsButtonRow(title: "Clear the Queue", systemImage: "xmark.circle", tone: .danger, isDestructive: true) {
+                preparation.clearQueue()
+            }
+        case .idle, .choosing, .finished:
+            prepareCardsRow
         }
+    }
+
+    private var prepareCardsRow: some View {
+        SettingsButtonRow(title: "Prepare Cards…", systemImage: "rectangle.stack.badge.plus", tone: .accent) {
+            preparation.check()
+        }
+        .disabled(aiVoiceIsOff)
     }
 
     private var stopPreparingRow: some View {
@@ -369,20 +403,29 @@ struct ReviewSettingsView: View {
     }
 
     private var preparationQuestion: String {
-        guard case .confirming(let toDo, _) = preparation.phase else { return "Prepare the AI voice?" }
-        return "Prepare the AI voice for \(toDo) cards?"
+        guard case .choosing(let toDo, _) = preparation.phase else { return "Prepare cards for the AI voice?" }
+        return "\(toDo) cards don’t have the AI voice yet. How many should be made ready?"
     }
 
-    private var preparationButton: String {
-        guard case .confirming(let toDo, _) = preparation.phase else { return "Prepare" }
-        return "Prepare \(toDo) Cards"
+    /// The batches to offer: the next 50 and 100 due, when there are more,
+    /// and all of them.
+    private var batchChoices: [Int] {
+        guard case .choosing(let toDo, _) = preparation.phase else { return [] }
+        return CardVoicePreparation.batchSizes.filter { $0 < toDo } + [toDo]
+    }
+
+    private func batchTitle(_ count: Int) -> String {
+        let cost = String(format: "$%.2f", Double(count) * CardVoicePreparation.costPerCard)
+        guard case .choosing(let toDo, _) = preparation.phase, count < toDo else {
+            return "All \(count) Cards (about \(cost))"
+        }
+        return "Next \(count) Due (about \(cost))"
     }
 
     private var preparationMessage: String {
-        guard case .confirming(let toDo, let ready) = preparation.phase else { return "" }
-        let cost = String(format: "$%.2f", Double(toDo) * CardVoicePreparation.costPerCard)
-        let readyAlready = ready > 0 ? " \(ready) cards are ready already." : ""
-        return "About \(cost), paid to Google once.\(readyAlready) Google lets the Gemini voice make about 100 recordings a day on most accounts, so about 50 cards get done a day, about 5 a minute; it stops at the day’s limit, and you can carry on tomorrow. Keep Amgi open while it works."
+        guard case .choosing(_, let ready) = preparation.phase else { return "" }
+        let readyAlready = ready > 0 ? "\(ready) cards are ready already. " : ""
+        return "\(readyAlready)They’re done soonest due first: what’s due now, then each day’s reviews and new cards, so the cards you’ll see next are ready first. Google lets the Gemini voice do about 50 cards a day; a bigger batch carries on by itself each day Amgi is open, and waits while hands-free runs. Keep Amgi open while it works: the screen stays on."
     }
 
     private var geminiKeyTitle: String {

@@ -54,8 +54,10 @@ public struct RootView: View {
             .onChange(of: scenePhase) { _, newPhase in
                 if newPhase == .active {
                     Task { await writeWidgetSnapshot() }
+                    resumeCardVoices()
                 }
             }
+            .task { resumeCardVoices() }
             .onOpenURL { url in
                 guard url.scheme == "amgi",
                       url.host == "review",
@@ -67,6 +69,14 @@ public struct RootView: View {
             }
             .themedRoot()
             .environment(\.appFont, AppFont(rawValue: appFontRaw) ?? .system)
+    }
+
+    /// Cards queued for the AI voice carry on whenever Amgi is open.
+    private func resumeCardVoices() {
+        #if canImport(UIKit)
+        guard onboardingCompleted, AmgiRoot.startupError == nil else { return }
+        CardVoicePreparation.shared.resume()
+        #endif
     }
 
     @ViewBuilder
