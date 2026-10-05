@@ -55,7 +55,8 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceRewrites))
     private var aiVoiceRewrites: Bool = true
 
-    @State private var hasGeminiKey = GeminiAPIKey.load() != nil
+    /// The saved Gemini key's kind, nil when there's none.
+    @State private var geminiKeyKind = GeminiAPIKey.load().map(GeminiAPIKey.kind(of:))
     @State private var editsGeminiKey = false
 
     /// The iPhone voices installed for the phone's language.
@@ -214,7 +215,7 @@ struct ReviewSettingsView: View {
                 )
                 SettingsSeparator()
                 SettingsButtonRow(
-                    title: hasGeminiKey ? "Gemini Key: Saved ✓" : "Add Your Gemini Key",
+                    title: geminiKeyTitle,
                     systemImage: "key",
                     tone: .accent
                 ) {
@@ -271,7 +272,7 @@ struct ReviewSettingsView: View {
                 preview?.stop()
             }
             .sheet(isPresented: $editsGeminiKey, onDismiss: {
-                hasGeminiKey = GeminiAPIKey.load() != nil
+                geminiKeyKind = GeminiAPIKey.load().map(GeminiAPIKey.kind(of:))
             }) {
                 GeminiKeySheet()
             }
@@ -292,6 +293,14 @@ struct ReviewSettingsView: View {
                 SettingsFootnote(sampleProblem)
             }
             SettingsFootnote("Cards added from \(ReviewPreferences.aiVoiceSince.formatted(date: .long, time: .omitted)) on are read in a natural voice from Google Gemini; the cards you had before keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free, and kept on this iPhone: about $2 for every 1,000 cards, and twice that from January 2027. If it isn’t ready within a few seconds, the iPhone voice reads that card instead.")
+        }
+    }
+
+    private var geminiKeyTitle: String {
+        switch geminiKeyKind {
+        case nil: "Add Your Gemini Key"
+        case .standard: "Gemini Key: Needs Replacing"
+        case .auth, .unknown: "Gemini Key: Saved ✓"
         }
     }
 

@@ -33,7 +33,7 @@ struct HandsFreeBanner: View {
                     Text(verbatim: "The AI voice didn’t come through, so the iPhone voice is reading. \(voiceProblem)")
                         .amgiFont(.caption)
                         .foregroundStyle(palette.warning)
-                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .accessibilityElement(children: .combine)

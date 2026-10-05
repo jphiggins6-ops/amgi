@@ -67,7 +67,16 @@ enum GeminiAPI {
     }
 
     private struct ErrorBody: Decodable {
-        struct Detail: Decodable { let message: String }
+        struct Detail: Decodable {
+            struct Info: Decodable {
+                let reason: String?
+            }
+
+            let message: String
+            let status: String?
+            let details: [Info]?
+        }
+
         let error: Detail
     }
 
@@ -75,8 +84,7 @@ enum GeminiAPI {
     /// explanation.
     static func parts(from body: Data, statusCode: Int) throws -> [Part] {
         guard (200..<300).contains(statusCode) else {
-            let message = (try? JSONDecoder().decode(ErrorBody.self, from: body))?.error.message
-            throw CardVoiceError.service(message ?? "Gemini answered with HTTP \(statusCode).")
+            throw failure(from: body, statusCode: statusCode)
         }
         guard let response = try? JSONDecoder().decode(Response.self, from: body) else {
             throw CardVoiceError.service("Gemini sent back an answer this app can't read.")
@@ -89,6 +97,44 @@ enum GeminiAPI {
             throw CardVoiceError.service("Gemini sent back nothing\(reason).")
         }
         return parts
+    }
+
+    /// Google's refusal in its own words, after what to do about it when
+    /// it's one people run into.
+    static func failure(from body: Data, statusCode: Int) -> CardVoiceError {
+        guard let error = (try? JSONDecoder().decode(ErrorBody.self, from: body))?.error else {
+            return .service("Gemini answered with HTTP \(statusCode).")
+        }
+        let reasons = Set((error.details ?? []).compactMap(\.reason))
+        guard let advice = advice(reasons: reasons, status: error.status ?? "", message: error.message, statusCode: statusCode) else {
+            return .service(error.message)
+        }
+        return .service("\(advice) Google says: “\(error.message)”")
+    }
+
+    /// What to do about the refusals people run into, from the reason
+    /// Google gives (`ErrorInfo.reason`), or its status or words.
+    static func advice(reasons: Set<String>, status: String, message: String, statusCode: Int) -> String? {
+        let words = message.lowercased()
+        if reasons.contains("API_KEY_SERVICE_BLOCKED") || words.hasPrefix("requests to this api") {
+            return "Google won’t let this key use Gemini. Keys that start with “AIza” stopped working for Gemini in September 2026, as did keys limited to other Google services. Make a new key at aistudio.google.com/apikey (new ones start with “AQ.”) and paste it in Settings → Review → AI Voice."
+        }
+        if reasons.contains("API_KEY_INVALID") || words.contains("api key not valid") || status == "UNAUTHENTICATED" {
+            return "Google doesn’t recognize this key. Copy it again from aistudio.google.com/apikey and paste it in Settings → Review → AI Voice."
+        }
+        if reasons.contains("SERVICE_DISABLED") || words.contains("has not been used in project") {
+            return "The Gemini API is switched off in this key’s Google Cloud project. A new key made in Google AI Studio comes with it switched on."
+        }
+        if status == "RESOURCE_EXHAUSTED" || statusCode == 429 {
+            return "This key has used up what Gemini allows for now. Turning on billing in Google AI Studio lifts the free tier’s limit of a few recordings a day."
+        }
+        if reasons.contains("BILLING_DISABLED") || words.contains("billing") {
+            return "Billing isn’t set up for this key’s project: turn it on in Google AI Studio."
+        }
+        if words.contains("location is not supported") {
+            return "Gemini isn’t available from where you are."
+        }
+        return nil
     }
 }
 

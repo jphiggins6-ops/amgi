@@ -67,6 +67,22 @@ public enum GeminiAPIKey {
     public static func load() -> String? { item.load() }
     public static func save(_ key: String) throws { try item.save(key) }
     public static func delete() { item.delete() }
+
+    /// Google's two kinds of key, told apart by how they start. Since
+    /// September 2026 the Gemini API takes only auth keys.
+    public enum Kind: Sendable {
+        /// "AQ.": bound to a service account, made by Google AI Studio.
+        case auth
+        /// "AIza": the older kind, which Gemini now refuses.
+        case standard
+        case unknown
+    }
+
+    public static func kind(of key: String) -> Kind {
+        if key.hasPrefix("AQ.") { return .auth }
+        if key.hasPrefix("AIza") { return .standard }
+        return .unknown
+    }
 }
 
 /// An API key kept in the Keychain as a generic password.

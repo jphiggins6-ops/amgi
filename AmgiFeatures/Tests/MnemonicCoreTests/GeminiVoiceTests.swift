@@ -65,9 +65,9 @@ import Testing
     }
 
     @Test func googlesOwnErrorComesBack() throws {
-        let bad = Data(#"{"error":{"code":429,"message":"Resource has been exhausted.","status":"RESOURCE_EXHAUSTED"}}"#.utf8)
-        #expect(throws: CardVoiceError.service("Resource has been exhausted.")) {
-            try GeminiSpeech.wav(from: bad, statusCode: 429)
+        let other = Data(#"{"error":{"code":500,"message":"Internal error encountered.","status":"INTERNAL"}}"#.utf8)
+        #expect(throws: CardVoiceError.service("Internal error encountered.")) {
+            try GeminiSpeech.wav(from: other, statusCode: 500)
         }
         #expect(throws: CardVoiceError.service("Gemini sent back no audio.")) {
             try GeminiSpeech.wav(from: try response(parts: [["text": "hello"]]), statusCode: 200)
@@ -76,6 +76,28 @@ import Testing
         #expect(throws: CardVoiceError.service("Gemini turned this card down (SAFETY).")) {
             try GeminiSpeech.wav(from: blocked, statusCode: 200)
         }
+    }
+
+    @Test func aRefusedKeySaysWhatToDo() {
+        let blocked = Data(#"""
+            {"error":{"code":403,"message":"Requests to this API generativelanguage.googleapis.com method google.ai.generativelanguage.v1beta.GenerativeService.GenerateContent are blocked.","status":"PERMISSION_DENIED","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"API_KEY_SERVICE_BLOCKED","domain":"googleapis.com"}]}}
+            """#.utf8)
+        let message = GeminiAPI.failure(from: blocked, statusCode: 403).errorDescription ?? ""
+        #expect(message.contains("aistudio.google.com/apikey"))
+        #expect(message.contains("“AIza”"))
+        #expect(message.hasSuffix("are blocked.”"), "Google's own words come last")
+
+        let invalid = Data(#"{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}"#.utf8)
+        #expect(GeminiAPI.failure(from: invalid, statusCode: 400).errorDescription?.contains("doesn’t recognize this key") == true)
+
+        let used = Data(#"{"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}"#.utf8)
+        #expect(GeminiAPI.failure(from: used, statusCode: 429).errorDescription?.contains("Turning on billing") == true)
+    }
+
+    @Test func aKeysKindShowsInHowItStarts() {
+        #expect(GeminiAPIKey.kind(of: "AQ.Ab8RN6Lexample") == .auth)
+        #expect(GeminiAPIKey.kind(of: "AIzaSyExample") == .standard)
+        #expect(GeminiAPIKey.kind(of: "sk-proj-example") == .unknown)
     }
 
     // MARK: - The script
