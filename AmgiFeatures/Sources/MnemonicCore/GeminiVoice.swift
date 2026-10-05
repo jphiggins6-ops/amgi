@@ -74,6 +74,10 @@ enum GeminiAPI {
                 struct Violation: Decodable {
                     let quotaId: String?
                     let quotaMetric: String?
+                    /// The limit itself, such as 100 a day.
+                    let quotaValue: Count?
+                    /// Which model it's for, among others.
+                    let quotaDimensions: [String: String]?
                 }
 
                 let reason: String?
@@ -86,6 +90,22 @@ enum GeminiAPI {
         }
 
         let error: Detail
+    }
+
+    /// A number Google sends as a string ("100") or as a number.
+    private struct Count: Decodable {
+        let value: Int?
+
+        init(from decoder: any Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let number = try? container.decode(Int.self) {
+                value = number
+            } else if let text = try? container.decode(String.self) {
+                value = Int(text)
+            } else {
+                value = nil
+            }
+        }
     }
 
     /// The parts of Gemini's answer, or an error carrying its own
@@ -114,24 +134,46 @@ enum GeminiAPI {
             return .service("Gemini answered with HTTP \(statusCode).")
         }
         if error.status == "RESOURCE_EXHAUSTED" || statusCode == 429 {
-            // Gemini's voice allows about 10 recordings a minute and 100 a
-            // day; which one ran out is in the quota's name.
-            let quotas = (error.details ?? []).flatMap { $0.violations ?? [] }
-                .flatMap { [$0.quotaId, $0.quotaMetric].compactMap { $0 } }
-            let daily = (quotas + [error.message]).contains {
-                let name = $0.lowercased().replacingOccurrences(of: "_", with: "")
-                return name.contains("perday") || name.contains("daily")
+            // Which limit ran out, a minute's or a day's, the free tier's
+            // or a paid key's, and how big it is, is in the quota's details.
+            let violations = (error.details ?? []).flatMap { $0.violations ?? [] }
+            let names = violations.flatMap { [$0.quotaId, $0.quotaMetric].compactMap { $0 } } + [error.message]
+            func mentions(_ word: String) -> Bool {
+                names.contains {
+                    $0.lowercased()
+                        .replacingOccurrences(of: "_", with: "")
+                        .replacingOccurrences(of: "-", with: "")
+                        .contains(word)
+                }
             }
-            let advice = daily
-                ? "Gemini’s voice has made all the recordings Google allows this key today (about 100 on most accounts, roughly 50 cards). It starts again tomorrow; until then the iPhone voice reads."
-                : "Google asked for a pause: Gemini’s voice allows only about 10 recordings a minute. The iPhone voice reads for a minute."
-            return .limited("\(advice) Google says: “\(error.message)”", daily: daily)
+            let daily = mentions("perday") || mentions("daily")
+            let limit = violations.compactMap { $0.quotaValue?.value }.first
+            let model = violations.compactMap { $0.quotaDimensions?["model"] }.first
+            let advice = limitAdvice(daily: daily, freeTier: mentions("freetier"), limit: limit, model: model)
+            // The day's limit on recordings, for Settings; not the rewrites'.
+            let recordingsLimit = daily && model.map { $0.contains("tts") } != false ? limit : nil
+            return .limited("\(advice) Google says: “\(error.message)”", daily: daily, limit: recordingsLimit)
         }
         let reasons = Set((error.details ?? []).compactMap(\.reason))
         guard let advice = advice(reasons: reasons, status: error.status ?? "", message: error.message, statusCode: statusCode) else {
             return .service(error.message)
         }
         return .service("\(advice) Google says: “\(error.message)”")
+    }
+
+    /// What a limit means, in words: the free tier's few recordings a day,
+    /// a paid key's hundred or so, or a minute's worth.
+    static func limitAdvice(daily: Bool, freeTier: Bool, limit: Int?, model: String?) -> String {
+        let things = model.map { $0.contains("tts") } == false ? "card rewrites" : "recordings"
+        let count = limit.map { "\($0) " } ?? ""
+        switch (daily, freeTier) {
+        case (true, true):
+            return "This key is on Google’s free tier, which allows only \(count.isEmpty ? "a few " : count)\(things) a day, and today’s are used up. Turning on billing for the key in Google AI Studio raises the limit (to about 100 recordings a day). It starts again tomorrow; until then the iPhone voice reads."
+        case (true, false):
+            return "This key has made all the \(count)\(things) Google allows it today\(limit == nil ? " (about 100 on most accounts)" : ""). It starts again tomorrow; until then the iPhone voice reads."
+        case (false, _):
+            return "Google asked for a pause\(limit.map { ": this key may make \($0) \(things) a minute" } ?? ""). The iPhone voice reads for a minute."
+        }
     }
 
     /// What to do about the refusals people run into, from the reason
@@ -416,15 +458,16 @@ public enum CardScript {
 public enum CardVoiceError: LocalizedError, Equatable {
     case noKey
     case service(String)
-    /// Google's limit for the key is reached, for the day or the minute.
-    case limited(String, daily: Bool)
+    /// Google's limit for the key is reached, for the day or the minute;
+    /// `limit` is the day's, when Google says.
+    case limited(String, daily: Bool, limit: Int?)
     case unimplemented
 
     public var errorDescription: String? {
         switch self {
         case .noKey:
             "Add your Gemini key first: Settings → Review → AI Voice."
-        case .service(let message), .limited(let message, _):
+        case .service(let message), .limited(let message, _, _):
             "Gemini: \(message)"
         case .unimplemented:
             "The AI voice isn't available here."

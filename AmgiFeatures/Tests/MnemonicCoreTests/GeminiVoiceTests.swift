@@ -93,7 +93,7 @@ import Testing
 
     @Test func googlesLimitsAreToldApart() {
         let minute = Data(#"{"error":{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}}"#.utf8)
-        guard case .limited(_, let daily) = GeminiAPI.failure(from: minute, statusCode: 429) else {
+        guard case .limited(_, let daily, _) = GeminiAPI.failure(from: minute, statusCode: 429) else {
             Issue.record("not a limit")
             return
         }
@@ -103,13 +103,28 @@ import Testing
             {"error":{"code":429,"message":"You exceeded your current quota.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaMetric":"generativelanguage.googleapis.com/generate_requests_per_model_per_day","quotaId":"GenerateRequestsPerDayPerProjectPerModel"}]}]}}
             """#.utf8)
         let error = GeminiAPI.failure(from: day, statusCode: 429)
-        guard case .limited(let message, let daily) = error else {
+        guard case .limited(let message, let daily, _) = error else {
             Issue.record("not a limit")
             return
         }
         #expect(daily)
         #expect(message.contains("tomorrow"))
         #expect(error.errorDescription?.hasPrefix("Gemini: ") == true)
+    }
+
+    @Test func theFreeTiersSmallDailyLimitIsNamed() {
+        let freeTier = Data(#"""
+            {"error":{"code":429,"message":"You exceeded your current quota.","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.QuotaFailure","violations":[{"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests","quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier","quotaDimensions":{"location":"global","model":"gemini-3.8-flash-tts"},"quotaValue":"10"}]},{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"37s"}]}}
+            """#.utf8)
+        guard case .limited(let message, let daily, let limit) = GeminiAPI.failure(from: freeTier, statusCode: 429) else {
+            Issue.record("not a limit")
+            return
+        }
+        #expect(daily)
+        #expect(limit == 10)
+        #expect(message.contains("free tier"))
+        #expect(message.contains("only 10 recordings a day"))
+        #expect(message.contains("billing"))
     }
 
     @Test func aKeysKindShowsInHowItStarts() {

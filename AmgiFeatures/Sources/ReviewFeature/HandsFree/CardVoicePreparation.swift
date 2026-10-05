@@ -4,7 +4,7 @@
 //
 
 #if canImport(UIKit)
-import Foundation
+public import Foundation
 public import Observation
 import UIKit
 import AnkiKit
@@ -36,10 +36,51 @@ public final class CardVoicePreparation {
         /// Found them, soonest due first; waiting for a batch to be chosen.
         case choosing(toDo: Int, ready: Int)
         case preparing(done: Int, of: Int)
-        /// Cards are queued, held up for `reason`.
-        case waiting(queued: Int, reason: String)
+        /// Cards are queued, held up.
+        case waiting(queued: Int, why: Wait)
         /// How it went.
         case finished(String)
+    }
+
+    /// Why the queued cards wait.
+    public enum Wait: Equatable, Sendable {
+        /// Google's daily limit for the key, until `until`; `message` is
+        /// what Google said, with what it means.
+        case dailyLimit(until: Date, message: String)
+        case stopped
+        case noConnection
+        /// Three cards in a row couldn't be done; the last one's reason.
+        case problems(String)
+
+        /// A line for Settings.
+        public var status: String {
+            switch self {
+            case .dailyLimit(let until, _):
+                let time = until.formatted(date: .omitted, time: .shortened)
+                let when = Calendar.current.isDateInToday(until) ? "at \(time)" : "tomorrow at \(time)"
+                return "Google’s daily limit reached. Carries on \(when)."
+            case .stopped:
+                return "Stopped."
+            case .noConnection:
+                return "No connection. Carries on the next time Amgi opens."
+            case .problems:
+                return "Stopped: three cards in a row couldn’t be done."
+            }
+        }
+
+        /// More about it, for underneath.
+        public var note: String {
+            switch self {
+            case .dailyLimit(_, let message):
+                return message + " Google’s day ends at midnight in California; the queue carries on by itself whenever Amgi is open after that."
+            case .stopped:
+                return "The rest stay queued, soonest due first. Carry On Now starts them again."
+            case .noConnection:
+                return "The card that was being made stays first in line."
+            case .problems(let reason):
+                return reason
+            }
+        }
     }
 
     public private(set) var phase: Phase = .idle
@@ -122,6 +163,7 @@ public final class CardVoicePreparation {
             return
         }
         phase = .checking
+        CardVoiceLog.shared.add("Finding the cards due soonest that don’t have the AI voice")
         work = Task {
             let sides = CardVoiceSides()
             do {
@@ -141,6 +183,7 @@ public final class CardVoicePreparation {
                     }
                 }
                 found = toDo
+                CardVoiceLog.shared.add("Found \(toDo.count) cards without the AI voice; \(ready) have it")
                 phase = toDo.isEmpty
                     ? .finished("All \(ready) cards have the AI voice.")
                     : .choosing(toDo: toDo.count, ready: ready)
@@ -157,6 +200,9 @@ public final class CardVoicePreparation {
         queue = Array(found.prefix(count))
         found = []
         phase = .idle
+        CardVoiceLog.shared.add("Queued the next \(queue.count) cards due")
+        // A choice made just now: worth a try even past yesterday's limit.
+        AIVoiceRecorder.clearPause()
         run(keepingScreenOn: true)
     }
 
@@ -164,7 +210,7 @@ public final class CardVoicePreparation {
     public func cancelChoosing() {
         guard case .choosing = phase else { return }
         found = []
-        phase = queue.isEmpty ? .idle : .waiting(queued: queue.count, reason: "Stopped for now.")
+        phase = queue.isEmpty ? .idle : .waiting(queued: queue.count, why: .stopped)
     }
 
     // MARK: - The queue
@@ -174,16 +220,22 @@ public final class CardVoicePreparation {
     public func resume() {
         guard !isWorking, !queue.isEmpty else { return }
         if handsFreeIsOn { return }
-        if AIVoiceRecorder.isPaused, let pause = AIVoiceRecorder.pause, pause.daily {
-            phase = .waiting(queued: queue.count, reason: Self.dailyLimitNote)
+        if let wait = Self.dailyLimitWait {
+            phase = .waiting(queued: queue.count, why: wait)
             return
         }
         guard Plan.current != nil, recorder.hasKey else { return }
+        CardVoiceLog.shared.add("Carrying on with \(queue.count) queued cards")
         run(keepingScreenOn: false)
     }
 
-    /// Starts again on the cards queued, with the screen kept on.
+    /// Starts again on the cards queued, with the screen kept on. Past
+    /// Google's daily limit too, as it may have been raised (billing
+    /// turned on, say): if not, it's back to waiting after one try.
     public func carryOn() {
+        guard !isWorking else { return }
+        AIVoiceRecorder.clearPause()
+        CardVoiceLog.shared.add("Carrying on with \(queue.count) queued cards, as asked")
         run(keepingScreenOn: true)
     }
 
@@ -192,7 +244,7 @@ public final class CardVoicePreparation {
         switch phase {
         case .checking:
             work?.cancel()
-            phase = queue.isEmpty ? .idle : .waiting(queued: queue.count, reason: "Stopped for now.")
+            phase = queue.isEmpty ? .idle : .waiting(queued: queue.count, why: .stopped)
         case .preparing:
             isStopping = true
             work?.cancel()
@@ -210,6 +262,9 @@ public final class CardVoicePreparation {
 
     func handsFreeStarted() {
         handsFreeIsOn = true
+        if case .preparing = phase {
+            CardVoiceLog.shared.add("Waiting while hands-free runs: it makes its own cards ready", .waiting)
+        }
     }
 
     func handsFreeStopped() {
@@ -217,7 +272,11 @@ public final class CardVoicePreparation {
         resume()
     }
 
-    private static let dailyLimitNote = "The Gemini voice has made all the recordings Google allows this key today (about 100 on most accounts, roughly 50 cards). The rest carry on by themselves tomorrow, whenever Amgi is open."
+    /// Waiting for Google's daily limit to pass, while it holds.
+    private static var dailyLimitWait: Wait? {
+        guard AIVoiceRecorder.isPaused, let pause = AIVoiceRecorder.pause, pause.daily else { return nil }
+        return .dailyLimit(until: pause.until, message: pause.reason)
+    }
 
     private func run(keepingScreenOn: Bool) {
         guard !isWorking, let plan = Plan.current else { return }
@@ -248,10 +307,12 @@ public final class CardVoicePreparation {
                 try? await Task.sleep(for: .seconds(2))
             }
             if Task.isCancelled {
-                return .waiting(queued: queue.count, reason: "Stopped for now.")
+                CardVoiceLog.shared.add("Stopped, with \(queue.count) cards still queued")
+                return .waiting(queued: queue.count, why: .stopped)
             }
-            if AIVoiceRecorder.isPaused, AIVoiceRecorder.pause?.daily == true {
-                return .waiting(queued: queue.count, reason: Self.dailyLimitNote)
+            if let wait = Self.dailyLimitWait {
+                CardVoiceLog.shared.add("Waiting for Google’s daily limit to pass: \(queue.count) cards still queued", .waiting)
+                return .waiting(queued: queue.count, why: wait)
             }
             // Gone, or no words to read: nothing to do.
             guard let html = await sides.sides(of: cardId) else {
@@ -279,30 +340,29 @@ public final class CardVoicePreparation {
                 queue.removeFirst()
                 done += 1
                 failuresInARow = 0
-            } else if AIVoiceRecorder.isPaused, AIVoiceRecorder.pause?.daily == true {
+            } else if let wait = Self.dailyLimitWait {
                 // The card stays first in line for tomorrow.
-                return .waiting(queued: queue.count, reason: Self.dailyLimitNote)
+                CardVoiceLog.shared.add("Waiting for Google’s daily limit to pass: \(queue.count) cards still queued", .waiting)
+                return .waiting(queued: queue.count, why: wait)
             } else if recorder.lastError is URLError {
-                return .waiting(
-                    queued: queue.count,
-                    reason: "The connection dropped. The rest carry on the next time Amgi opens."
-                )
+                CardVoiceLog.shared.add("The connection dropped: \(queue.count) cards still queued", .waiting)
+                return .waiting(queued: queue.count, why: .noConnection)
             } else {
                 queue.removeFirst()
                 failed += 1
                 failuresInARow += 1
                 if failuresInARow >= 3 {
-                    return .waiting(
-                        queued: queue.count,
-                        reason: "Three cards in a row couldn’t be done, so it stopped. \(recorder.problem ?? "")"
-                    )
+                    CardVoiceLog.shared.add("Stopped after three cards in a row couldn’t be done", .problem)
+                    return .waiting(queued: queue.count, why: .problems(recorder.problem ?? ""))
                 }
             }
             phase = .preparing(done: done, of: total)
         }
         if failed > 0 {
+            CardVoiceLog.shared.add("Queue done: \(done) ready, \(failed) couldn’t be done", .done)
             return .finished("Done: \(done) cards have the AI voice; \(failed) couldn’t be done and are left to the iPhone voice. \(recorder.problem ?? "")")
         }
+        CardVoiceLog.shared.add("Queue done: \(done) cards ready", .done)
         return .finished("Done: \(done) cards have the AI voice.")
     }
 }

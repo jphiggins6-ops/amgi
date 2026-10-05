@@ -4,7 +4,8 @@
 //
 
 import Dependencies
-import Foundation
+public import Foundation
+public import Observation
 import OSLog
 import AppCore
 import MnemonicCore
@@ -76,6 +77,14 @@ final class AIVoiceRecorder {
         return true
     }
 
+    /// Lets new work start again before a limit has passed: billing
+    /// turned on, say.
+    static func clearPause() {
+        pause = nil
+        UserDefaults.standard.removeObject(forKey: pausedUntilKey)
+        UserDefaults.standard.removeObject(forKey: pauseReasonKey)
+    }
+
     private static let pausedUntilKey = "ai_voice_paused_until"
     private static let pauseReasonKey = "ai_voice_pause_reason"
 
@@ -136,28 +145,41 @@ final class AIVoiceRecorder {
             return
         }
         let client = self.client
+        let log = CardVoiceLog.shared
+        let label = CardVoiceLog.quote(card.question)
         making[key] = Task {
             do {
                 var lines = self.lines(for: card, rewrites: rewrites)
                 if lines == nil {
+                    log.add("Writing the script for \(label)")
                     let script = try await client.script(card.written)
                     try CardVoiceRecordings.save(script, for: card.written)
                     let checked = self.checked(script, card)
                     scripts[CardVoiceRecordings.scriptFile(for: card.written)] = checked
                     lines = checked
+                    log.add("Script written: \(CardVoiceLog.quote(checked.question))")
                 }
                 // The question first: it's read first.
-                for text in [lines?.question, lines?.answer].compactMap({ $0 })
+                let sides = [("question", lines?.question ?? ""), ("answer", lines?.answer ?? "")]
+                for (side, text) in sides
                 where !text.isEmpty && CardVoiceRecordings.recording(of: text, voice: voice) == nil {
+                    log.add("Recording the \(side) of \(label)")
                     let wav = try await client.record(text, voice)
                     try CardVoiceRecordings.save(wav: wav, of: text, voice: voice)
+                    log.countRecording()
                 }
+                log.add("Ready: \(label)", .done)
                 problem = nil
                 lastError = nil
             } catch {
                 problem = error.localizedDescription
                 lastError = error
                 Self.pauseIfLimited(error)
+                if case .limited? = error as? CardVoiceError {
+                    log.add("Google’s limit, at \(label): \(error.localizedDescription)", .waiting)
+                } else {
+                    log.add("Couldn’t do \(label): \(error.localizedDescription)", .problem)
+                }
                 Log.review.error("The AI voice couldn't do a card: \(error.localizedDescription)")
             }
             making[key] = nil
@@ -167,7 +189,10 @@ final class AIVoiceRecorder {
     /// Holds new work back when Google says the key's limit is reached:
     /// for a minute, or until its day ends at midnight in California.
     private static func pauseIfLimited(_ error: any Error) {
-        guard case .limited(_, let daily)? = error as? CardVoiceError else { return }
+        guard case .limited(_, let daily, let limit)? = error as? CardVoiceError else { return }
+        if daily {
+            CardVoiceLog.shared.noteDailyLimit(limit)
+        }
         let now = Date()
         var until = now.addingTimeInterval(60)
         if daily {
@@ -216,14 +241,19 @@ final class AIVoiceRecorder {
         let key = "line\n\(voice)\n\(text)"
         if making[key] == nil {
             let client = self.client
+            let log = CardVoiceLog.shared
             making[key] = Task {
                 do {
+                    log.add("Recording a sample in \(voice)")
                     let wav = try await client.record(text, voice)
                     try CardVoiceRecordings.save(wav: wav, of: text, voice: voice)
+                    log.countRecording()
+                    log.add("Sample ready", .done)
                     problem = nil
                 } catch {
                     problem = error.localizedDescription
                     Self.pauseIfLimited(error)
+                    log.add("Couldn’t record the sample: \(error.localizedDescription)", .problem)
                 }
                 making[key] = nil
             }
@@ -249,5 +279,126 @@ final class AIVoiceRecorder {
             CardVoiceRecordings.scriptFile(for: card.written).lastPathComponent,
             card.question, card.answer, voice, rewrites ? "script" : "as is",
         ].joined(separator: "\n")
+    }
+}
+
+// MARK: - What it's been doing
+
+/// What the AI voice has been doing, newest first, for Settings → Review →
+/// AI Voice → Activity: each card's steps, each card made ready, and each
+/// refusal from Google in its own words. The last 300 entries are kept
+/// between launches, with today's count of recordings (Google counts its
+/// days in California) and the daily limit Google last gave for the key.
+@MainActor
+@Observable
+public final class CardVoiceLog {
+    public static let shared = CardVoiceLog()
+
+    public struct Entry: Codable, Identifiable, Equatable, Sendable {
+        public enum Kind: String, Codable, Sendable {
+            /// Under way.
+            case step
+            case done
+            /// Held up by Google's limits, or waiting its turn.
+            case waiting
+            case problem
+        }
+
+        public let id: UUID
+        public let date: Date
+        public let kind: Kind
+        public let text: String
+    }
+
+    public private(set) var entries: [Entry] = []
+    /// Recordings made today, by Google's day.
+    public private(set) var recordingsToday = 0
+    /// The daily limit Google last said the key has, when it said.
+    public private(set) var dailyLimit: Int?
+
+    private init() {
+        entries = Self.loadEntries()
+        let defaults = UserDefaults.standard
+        dailyLimit = defaults.object(forKey: Self.dailyLimitKey) as? Int
+        refresh()
+    }
+
+    func add(_ text: String, _ kind: Entry.Kind = .step) {
+        entries.insert(Entry(id: UUID(), date: Date(), kind: kind, text: text), at: 0)
+        if entries.count > Self.maxEntries {
+            entries.removeLast(entries.count - Self.maxEntries)
+        }
+        saveEntries()
+    }
+
+    public func clear() {
+        entries = []
+        saveEntries()
+    }
+
+    /// The whole log as text, oldest first, to copy.
+    public var asText: String {
+        entries.reversed()
+            .map { "\($0.date.formatted(date: .abbreviated, time: .standard))  \($0.text)" }
+            .joined(separator: "\n")
+    }
+
+    /// Today's count, from nothing again once Google's day has turned.
+    public func refresh() {
+        let defaults = UserDefaults.standard
+        recordingsToday = defaults.string(forKey: Self.usageDayKey) == Self.googleDay()
+            ? defaults.integer(forKey: Self.usageCountKey)
+            : 0
+    }
+
+    func countRecording() {
+        let defaults = UserDefaults.standard
+        let today = Self.googleDay()
+        if defaults.string(forKey: Self.usageDayKey) != today {
+            defaults.set(today, forKey: Self.usageDayKey)
+            recordingsToday = 0
+        }
+        recordingsToday += 1
+        defaults.set(recordingsToday, forKey: Self.usageCountKey)
+    }
+
+    func noteDailyLimit(_ limit: Int?) {
+        guard let limit else { return }
+        dailyLimit = limit
+        UserDefaults.standard.set(limit, forKey: Self.dailyLimitKey)
+    }
+
+    /// A card's text in quotes, cut short when long.
+    static func quote(_ text: String) -> String {
+        let short = text.count > 70 ? String(text.prefix(69)) + "…" : text
+        return "“\(short)”"
+    }
+
+    /// The date in California, where Google's day is counted: "2026-10-05".
+    static func googleDay(_ date: Date = Date()) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+        let day = calendar.dateComponents([.year, .month, .day], from: date)
+        return "\(day.year ?? 0)-\(day.month ?? 0)-\(day.day ?? 0)"
+    }
+
+    private static let maxEntries = 300
+    private static let usageDayKey = "ai_voice_usage_day"
+    private static let usageCountKey = "ai_voice_usage_count"
+    private static let dailyLimitKey = "ai_voice_daily_limit"
+
+    private static var file: URL {
+        URL.applicationSupportDirectory.appending(path: "CardVoiceActivity.json")
+    }
+
+    private static func loadEntries() -> [Entry] {
+        guard let data = try? Data(contentsOf: file) else { return [] }
+        return (try? JSONDecoder().decode([Entry].self, from: data)) ?? []
+    }
+
+    private func saveEntries() {
+        let file = Self.file
+        try? FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? JSONEncoder().encode(entries).write(to: file, options: .atomic)
     }
 }

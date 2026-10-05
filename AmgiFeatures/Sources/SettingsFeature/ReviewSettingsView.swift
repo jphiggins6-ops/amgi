@@ -14,6 +14,7 @@ import Sharing
 import ReviewCore
 import ReviewFeature
 import MnemonicCore
+import UIKit
 
 struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.openLinksExternally))
@@ -282,6 +283,17 @@ struct ReviewSettingsView: View {
                 .disabled(aiVoiceIsOff || isMakingSample)
                 SettingsSeparator()
                 preparationRows
+                SettingsSeparator()
+                SettingsValueRow(
+                    title: "Recordings today",
+                    value: recordingsTodayText,
+                    systemImage: "waveform",
+                    tone: .info
+                )
+                SettingsSeparator()
+                SettingsRowLink(title: "Activity", systemImage: "list.bullet.rectangle", tone: .neutral) {
+                    AIVoiceActivityView()
+                }
                 if recordingsSize > 0 {
                     SettingsSeparator()
                     SettingsButtonRow(
@@ -298,6 +310,7 @@ struct ReviewSettingsView: View {
             // once for each view in it.
             .task {
                 recordingsSize = CardVoiceRecordings.size()
+                CardVoiceLog.shared.refresh()
             }
             .onDisappear {
                 preview?.stop()
@@ -336,12 +349,17 @@ struct ReviewSettingsView: View {
             switch preparation.phase {
             case .finished(let outcome):
                 SettingsFootnote(outcome)
-            case .waiting(_, let reason):
-                SettingsFootnote(reason)
-            case .idle, .checking, .choosing, .preparing:
+            case .waiting(_, let why):
+                SettingsFootnote(why.note)
+            case .checking, .preparing:
+                // What it's doing this moment.
+                if let latest = CardVoiceLog.shared.entries.first {
+                    SettingsFootnote("Now: \(latest.text) (\(latest.date.formatted(date: .omitted, time: .standard)))")
+                }
+            case .idle, .choosing:
                 EmptyView()
             }
-            SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or ahead of time with Prepare Cards, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Prepare Cards does the cards due soonest first, a batch at a time. Google lets the Gemini voice make about 100 recordings a day on most accounts, roughly 50 cards; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it.")
+            SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or ahead of time with Prepare Cards, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Prepare Cards does the cards due soonest first, a batch at a time. Google lets the Gemini voice make about 100 recordings a day once billing is on for the key, roughly 50 cards, and only about 10 on its free tier; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it.")
         }
     }
 
@@ -365,10 +383,16 @@ struct ReviewSettingsView: View {
                 .disabled(true)
             SettingsSeparator()
             stopPreparingRow
-        case .waiting(let queued, _):
+        case .waiting(let queued, let why):
             SettingsValueRow(title: "Queued", value: "\(queued) cards", systemImage: "clock", tone: .accent)
             SettingsSeparator()
-            SettingsButtonRow(title: "Carry On Now", systemImage: "play.circle", tone: .accent) {
+            SettingsValueRow(title: "Status", value: why.status, systemImage: "info.circle", tone: .learning)
+            SettingsSeparator()
+            SettingsButtonRow(
+                title: isDailyLimit(why) ? "Try Again Now" : "Carry On Now",
+                systemImage: "play.circle",
+                tone: .accent
+            ) {
                 preparation.carryOn()
             }
             .disabled(aiVoiceIsOff)
@@ -381,6 +405,18 @@ struct ReviewSettingsView: View {
         case .idle, .choosing, .finished:
             prepareCardsRow
         }
+    }
+
+    private func isDailyLimit(_ why: CardVoicePreparation.Wait) -> Bool {
+        if case .dailyLimit = why { return true }
+        return false
+    }
+
+    /// "37", or "37 of 100" once Google has said what the key's limit is.
+    private var recordingsTodayText: String {
+        let log = CardVoiceLog.shared
+        guard let limit = log.dailyLimit else { return "\(log.recordingsToday)" }
+        return "\(log.recordingsToday) of \(limit)"
     }
 
     private var prepareCardsRow: some View {
@@ -532,6 +568,70 @@ struct ReviewSettingsView: View {
                     isOn: Binding($playAudioInSilentMode)
                 )
             }
+        }
+    }
+}
+
+/// Settings → Review → AI Voice → Activity: everything the AI voice has
+/// done lately, newest first, with Google's own words whenever it said no.
+private struct AIVoiceActivityView: View {
+    @Environment(\.palette) private var palette
+
+    private var log: CardVoiceLog { .shared }
+
+    var body: some View {
+        List {
+            Section {
+                if log.entries.isEmpty {
+                    Text("Nothing yet. Each step the AI voice takes, each card it makes ready, and anything Google says shows up here.")
+                        .foregroundStyle(palette.textSecondary)
+                }
+                ForEach(log.entries) { entry in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(entry.date.formatted(date: .abbreviated, time: .standard))
+                            .font(.caption)
+                            .foregroundStyle(palette.textTertiary)
+                        Text(entry.text)
+                            .font(.callout)
+                            .foregroundStyle(color(of: entry.kind))
+                            .textSelection(.enabled)
+                    }
+                }
+            } footer: {
+                Text(verbatim: "Recordings today: \(recordingsToday). Google counts its days in California, so the count starts again at midnight there.")
+            }
+        }
+        .navigationTitle("AI Voice Activity")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    Button("Copy All", systemImage: "doc.on.doc") {
+                        UIPasteboard.general.string = log.asText
+                    }
+                    Button("Clear", systemImage: "trash", role: .destructive) {
+                        log.clear()
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                .disabled(log.entries.isEmpty)
+            }
+        }
+        .onAppear { log.refresh() }
+    }
+
+    private var recordingsToday: String {
+        guard let limit = log.dailyLimit else { return "\(log.recordingsToday)" }
+        return "\(log.recordingsToday) of \(limit)"
+    }
+
+    private func color(of kind: CardVoiceLog.Entry.Kind) -> Color {
+        switch kind {
+        case .step: palette.textPrimary
+        case .done: palette.positive
+        case .waiting: palette.warning
+        case .problem: palette.danger
         }
     }
 }
