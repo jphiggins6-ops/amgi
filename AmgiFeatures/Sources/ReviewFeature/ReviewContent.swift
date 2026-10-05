@@ -81,12 +81,6 @@ struct ReviewContent: View {
                     ReviewTimeLeft(session: session)
                 }
 
-                #if canImport(UIKit)
-                if handsFree.isOn || handsFree.problem != nil {
-                    HandsFreeBanner(controller: handsFree)
-                }
-                #endif
-
                 if let startError = session.startError {
                     ReviewStartFailureView(message: startError) { session.start() }
                 } else if session.isFinished {
@@ -124,6 +118,11 @@ struct ReviewContent: View {
                 if opened { handsFree.stop() }
             }
             .onDisappear { handsFree.stop() }
+            .alert("Hands-Free Stopped", isPresented: handsFreeStoppedAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(verbatim: handsFree.problem ?? "")
+            }
             #endif
             .navigationBarTitleDisplayMode(.inline)
             #if canImport(UIKit)
@@ -138,6 +137,9 @@ struct ReviewContent: View {
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     ReviewEditButton(session: session, destination: $destination, shortcutEnabled: keyboardActive)
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    HandsFreeButton(controller: handsFree) { toggleHandsFree() }
                 }
                 ToolbarItem(placement: .principal) {
                     ReviewDeckTitle(session: session)
@@ -264,6 +266,18 @@ struct ReviewContent: View {
             break
         }
     }
+
+    #if canImport(UIKit)
+    /// Up while there's a reason hands-free stopped by itself.
+    private var handsFreeStoppedAlert: Binding<Bool> {
+        Binding(
+            get: { handsFree.problem != nil },
+            set: { shown in
+                if !shown { handsFree.dismissProblem() }
+            }
+        )
+    }
+    #endif
 
     private func toggleHandsFree() {
         #if canImport(UIKit)
