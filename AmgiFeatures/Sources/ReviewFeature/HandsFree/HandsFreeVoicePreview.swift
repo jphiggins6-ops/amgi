@@ -30,18 +30,13 @@ public final class HandsFreeVoicePreview {
         end()
     }
 
-    /// The sample in one of OpenAI's voices, recorded the first time
-    /// (a fraction of a cent) and kept. Nil once it has played, otherwise
-    /// why it couldn't.
+    /// The sample in one of Gemini's voices, recorded the first time (a
+    /// fraction of a cent) and kept. Nil once it has played, otherwise why
+    /// it couldn't.
     public func playAIVoice(_ voice: String) async -> String? {
-        guard recorder.hasKey else { return CardExplanationError.noKey.localizedDescription }
-        guard let recording = await recorder.recording(
-            of: Self.sample,
-            voice: voice,
-            make: true,
-            waitingAtMost: .seconds(30)
-        ) else {
-            return recorder.problem ?? "OpenAI took too long to answer. Try again in a moment."
+        guard recorder.hasKey else { return CardVoiceError.noKey.localizedDescription }
+        guard let recording = await recorder.recording(ofLine: Self.sample, voice: voice, waitingAtMost: .seconds(30)) else {
+            return recorder.problem ?? "Gemini took too long to answer. Try again in a moment."
         }
         begin()
         let played = await speaker.play(recording)

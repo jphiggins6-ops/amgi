@@ -39,7 +39,8 @@ public enum ReviewPreferences {
         public static let handsFreeSpeed = "review_pref_hands_free_speed"
         public static let handsFreeVoice = "review_pref_hands_free_voice"
         public static let aiVoiceForNewCards = "review_pref_ai_voice_for_new_cards"
-        public static let aiVoice = "review_pref_ai_voice"
+        public static let aiVoice = "review_pref_ai_voice_gemini"
+        public static let aiVoiceRewrites = "review_pref_ai_voice_rewrites"
         public static let aiVoiceSince = "review_pref_ai_voice_since"
         public static let appIconBadge = "review_pref_app_icon_badge"
         public static let appIconTurnsGreen = "review_pref_app_icon_turns_green"
@@ -63,7 +64,13 @@ public enum ReviewPreferences {
     }
 
     public static var aiVoice: AIVoice {
-        UserDefaults.standard.string(forKey: Keys.aiVoice).flatMap(AIVoice.init(rawValue:)) ?? .marin
+        UserDefaults.standard.string(forKey: Keys.aiVoice).flatMap(AIVoice.init(rawValue:)) ?? .defaultVoice
+    }
+
+    /// Whether a card is rewritten the way a tutor would say it before the
+    /// AI voice reads it. On unless switched off in Settings.
+    public static var aiVoiceRewrites: Bool {
+        UserDefaults.standard.object(forKey: Keys.aiVoiceRewrites) as? Bool ?? true
     }
 
     /// Cards added from this moment on are read in the AI voice; the deck
@@ -111,16 +118,81 @@ public enum ReviewPreferences {
 }
 
 /// The AI voice hands-free mode reads newly added cards in: one of
-/// OpenAI's. Marin and Cedar are the ones OpenAI calls its best.
+/// Google Gemini's 30 voices, each with Google's word for how it sounds.
 public enum AIVoice: String, CaseIterable, Identifiable, Sendable {
-    case marin, cedar, coral, sage, nova, shimmer, alloy, ash, ballad, echo, fable, onyx, verse
+    case achernar = "Achernar"
+    case achird = "Achird"
+    case algenib = "Algenib"
+    case algieba = "Algieba"
+    case alnilam = "Alnilam"
+    case aoede = "Aoede"
+    case autonoe = "Autonoe"
+    case callirrhoe = "Callirrhoe"
+    case charon = "Charon"
+    case despina = "Despina"
+    case enceladus = "Enceladus"
+    case erinome = "Erinome"
+    case fenrir = "Fenrir"
+    case gacrux = "Gacrux"
+    case iapetus = "Iapetus"
+    case kore = "Kore"
+    case laomedeia = "Laomedeia"
+    case leda = "Leda"
+    case orus = "Orus"
+    case puck = "Puck"
+    case pulcherrima = "Pulcherrima"
+    case rasalgethi = "Rasalgethi"
+    case sadachbia = "Sadachbia"
+    case sadaltager = "Sadaltager"
+    case schedar = "Schedar"
+    case sulafat = "Sulafat"
+    case umbriel = "Umbriel"
+    case vindemiatrix = "Vindemiatrix"
+    case zephyr = "Zephyr"
+    case zubenelgenubi = "Zubenelgenubi"
+
+    /// Warm, for a tutor reading cards aloud.
+    public static let defaultVoice = AIVoice.sulafat
 
     public var id: String { rawValue }
 
+    /// "Sulafat (warm)".
     public var title: String {
+        "\(rawValue) (\(sound))"
+    }
+
+    public var sound: String {
         switch self {
-        case .marin, .cedar: "\(rawValue.capitalized) (best)"
-        default: rawValue.capitalized
+        case .achernar: "soft"
+        case .achird: "friendly"
+        case .algenib: "gravelly"
+        case .algieba: "smooth"
+        case .alnilam: "firm"
+        case .aoede: "breezy"
+        case .autonoe: "bright"
+        case .callirrhoe: "easy-going"
+        case .charon: "informative"
+        case .despina: "smooth"
+        case .enceladus: "breathy"
+        case .erinome: "clear"
+        case .fenrir: "excitable"
+        case .gacrux: "mature"
+        case .iapetus: "clear"
+        case .kore: "firm"
+        case .laomedeia: "upbeat"
+        case .leda: "youthful"
+        case .orus: "firm"
+        case .puck: "upbeat"
+        case .pulcherrima: "forward"
+        case .rasalgethi: "informative"
+        case .sadachbia: "lively"
+        case .sadaltager: "knowledgeable"
+        case .schedar: "even"
+        case .sulafat: "warm"
+        case .umbriel: "easy-going"
+        case .vindemiatrix: "gentle"
+        case .zephyr: "bright"
+        case .zubenelgenubi: "casual"
         }
     }
 }

@@ -52,10 +52,29 @@ public enum MnemonicSettings {
 /// The OpenAI API key, in the Keychain. Deliberately not profile-scoped:
 /// the key belongs to the person paying, not to a collection.
 public enum MnemonicAPIKey {
-    static let service = "com.amgiapp.mnemonic"
-    static let account = "openai-api-key"
+    static let item = KeychainKey(service: "com.amgiapp.mnemonic", account: "openai-api-key")
 
-    public static func load() -> String? {
+    public static func load() -> String? { item.load() }
+    public static func save(_ key: String) throws { try item.save(key) }
+    public static func delete() { item.delete() }
+}
+
+/// The Google Gemini API key, for hands-free mode's AI voice. In the
+/// Keychain, like the OpenAI key, and likewise not profile-scoped.
+public enum GeminiAPIKey {
+    static let item = KeychainKey(service: "com.amgiapp.gemini", account: "gemini-api-key")
+
+    public static func load() -> String? { item.load() }
+    public static func save(_ key: String) throws { try item.save(key) }
+    public static func delete() { item.delete() }
+}
+
+/// An API key kept in the Keychain as a generic password.
+struct KeychainKey: Sendable {
+    let service: String
+    let account: String
+
+    func load() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -74,7 +93,7 @@ public enum MnemonicAPIKey {
 
     /// Update in place, else add — the same order as `KeychainHelper`, so a
     /// failed write never leaves the old key deleted.
-    public static func save(_ key: String) throws {
+    func save(_ key: String) throws {
         let data = Data(key.trimmingCharacters(in: .whitespacesAndNewlines).utf8)
         let identity: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -88,13 +107,14 @@ public enum MnemonicAPIKey {
         var insert = identity
         insert[kSecValueData as String] = data
         // ThisDeviceOnly: a paid API key shouldn't ride a backup onto
-        // another device without the owner re-entering it.
+        // another device without the owner re-entering it. AfterFirstUnlock:
+        // hands-free mode reads it with the screen locked.
         insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let status = SecItemAdd(insert as CFDictionary, nil)
         guard status == errSecSuccess else { throw MnemonicError.keychain(status) }
     }
 
-    public static func delete() {
+    func delete() {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

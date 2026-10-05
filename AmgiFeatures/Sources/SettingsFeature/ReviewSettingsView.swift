@@ -13,6 +13,7 @@ import Theme
 import Sharing
 import ReviewCore
 import ReviewFeature
+import MnemonicCore
 
 struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.openLinksExternally))
@@ -49,7 +50,13 @@ struct ReviewSettingsView: View {
     private var aiVoiceForNewCards: Bool = true
 
     @Shared(.appStorage(ReviewPreferences.Keys.aiVoice))
-    private var aiVoice: String = AIVoice.marin.rawValue
+    private var aiVoice: String = AIVoice.defaultVoice.rawValue
+
+    @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceRewrites))
+    private var aiVoiceRewrites: Bool = true
+
+    @State private var hasGeminiKey = GeminiAPIKey.load() != nil
+    @State private var editsGeminiKey = false
 
     /// The iPhone voices installed for the phone's language.
     @State private var iPhoneVoices: [HandsFreeVoiceChoice] = []
@@ -206,6 +213,14 @@ struct ReviewSettingsView: View {
                     isOn: Binding($aiVoiceForNewCards)
                 )
                 SettingsSeparator()
+                SettingsButtonRow(
+                    title: hasGeminiKey ? "Gemini Key: Saved ✓" : "Add Your Gemini Key",
+                    systemImage: "key",
+                    tone: .accent
+                ) {
+                    editsGeminiKey = true
+                }
+                SettingsSeparator()
                 SettingsPickerRow(
                     title: "Voice",
                     systemImage: "person.wave.2",
@@ -216,6 +231,14 @@ struct ReviewSettingsView: View {
                         Text(verbatim: voice.title).tag(voice.rawValue)
                     }
                 }
+                .disabled(!aiVoiceForNewCards)
+                SettingsSeparator()
+                SettingsToggleRow(
+                    title: "Read questions naturally",
+                    systemImage: "text.bubble",
+                    tone: .learning,
+                    isOn: Binding($aiVoiceRewrites)
+                )
                 .disabled(!aiVoiceForNewCards)
                 SettingsSeparator()
                 SettingsButtonRow(
@@ -239,11 +262,18 @@ struct ReviewSettingsView: View {
                     }
                 }
             }
+            // Here rather than on the section's Group, which would run them
+            // once for each view in it.
             .task {
                 recordingsSize = CardVoiceRecordings.size()
             }
             .onDisappear {
                 preview?.stop()
+            }
+            .sheet(isPresented: $editsGeminiKey, onDismiss: {
+                hasGeminiKey = GeminiAPIKey.load() != nil
+            }) {
+                GeminiKeySheet()
             }
             .confirmationDialog(
                 "Delete the AI voice’s recordings?",
@@ -256,12 +286,12 @@ struct ReviewSettingsView: View {
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("New cards are recorded again, and paid for again, the next time they’re read.")
+                Text("New cards are written and recorded again, and paid for again, the next time they’re read.")
             }
             if let sampleProblem {
                 SettingsFootnote(sampleProblem)
             }
-            SettingsFootnote("Cards added from \(ReviewPreferences.aiVoiceSince.formatted(date: .long, time: .omitted)) on are read in a natural AI voice from OpenAI, with the OpenAI key from the Graveyard tab; the cards you had before keep the iPhone voice, for free. Each side is recorded the first time it’s read and kept on this iPhone, so it’s paid for once: about $2–3 for every 1,000 cards. If a recording doesn’t come within a few seconds, the iPhone voice reads that card instead.")
+            SettingsFootnote("Cards added from \(ReviewPreferences.aiVoiceSince.formatted(date: .long, time: .omitted)) on are read in a natural voice from Google Gemini; the cards you had before keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free, and kept on this iPhone: about $2 for every 1,000 cards, and twice that from January 2027. If it isn’t ready within a few seconds, the iPhone voice reads that card instead.")
         }
     }
 

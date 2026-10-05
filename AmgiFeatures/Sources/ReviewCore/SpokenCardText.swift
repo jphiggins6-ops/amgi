@@ -34,25 +34,37 @@ public enum SpokenCardText {
         spoken(readable(html))
     }
 
-    /// Just the answer, not the card again. On a cloze card that's the
-    /// revealed cloze, or clozes, alone; otherwise what's below Anki's
+    /// The question side as written, a cloze blank kept as "[...]": for the
+    /// AI voice to rewrite the way a tutor would ask it (`CardScript`).
+    public static func questionAsWritten(fromHTML html: String) -> String {
+        readable(html, blank: " [...] ")
+    }
+
+    /// Just the answer, not the card again (`answerAsWritten`), read the
+    /// way it's said.
+    public static func answer(fromHTML html: String) -> String {
+        spoken(answerAsWritten(fromHTML: html))
+    }
+
+    /// Just the answer, as written. On a cloze card that's the revealed
+    /// cloze, or clozes, alone; otherwise what's below Anki's
     /// `<hr id=answer>`, or the whole side without that line. The Extra
     /// field (from `ExtraFieldMarker` on) is never read.
-    public static func answer(fromHTML html: String) -> String {
+    public static func answerAsWritten(fromHTML html: String) -> String {
         var side = html
         if let extra = side.range(of: ExtraFieldMarker.html) {
             side = String(side[..<extra.lowerBound])
         }
         let clozes = revealedClozes(in: side)
         if !clozes.isEmpty {
-            return spoken(clozes.map(readable).filter { !$0.isEmpty }.joined(separator: " "))
+            return clozes.map { readable($0) }.filter { !$0.isEmpty }.joined(separator: " ")
         }
         let range = NSRange(side.startIndex..., in: side)
         if let match = answerDivider.firstMatch(in: side, range: range),
            let divider = Range(match.range, in: side) {
-            return spoken(readable(String(side[divider.upperBound...])))
+            return readable(String(side[divider.upperBound...]))
         }
-        return spoken(readable(side))
+        return readable(side)
     }
 
     /// The inner HTML of each answered cloze (`<span class="cloze">`), in
@@ -88,11 +100,12 @@ public enum SpokenCardText {
     /// A rendered side as text to speak. Anything the card doesn't show is
     /// left out: hidden elements (a hint's content until it's tapped),
     /// scripts, styles, icons and buttons. Pictures and sounds are skipped,
-    /// and each line ends in a stop, so the voice pauses between lines.
-    public static func readable(_ html: String) -> String {
+    /// and each line ends in a stop, so the voice pauses between lines. A
+    /// cloze blank becomes `blank`.
+    public static func readable(_ html: String, blank: String = " blank ") -> String {
         var text = replacing(comments, in: html, with: " ")
         text = withoutHiddenElements(text)
-        text = replacing(clozeBlank, in: text, with: " blank ")
+        text = replacing(clozeBlank, in: text, with: blank)
         text = replacing(soundTag, in: text, with: " ")
         text = replacing(mathDelimiter, in: text, with: " ")
         text = replacing(lineBreak, in: text, with: "\n")

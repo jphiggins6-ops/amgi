@@ -242,8 +242,9 @@ let package = Package(
         // Paste, which uses the same Extra field) share it without an edge
         // between them. Pending ideas live inside the notes themselves as HTML
         // comments — see MnemonicMarker — so there is no queue to persist.
-        // The other OpenAI calls made with the same key live here too:
-        // Explain (CardExplainer) and hands-free's AI voice (OpenAISpeech).
+        // The other AI calls live here too: Explain (CardExplainer, with
+        // the same OpenAI key) and hands-free's AI voice (GeminiVoice, with
+        // a Google Gemini key).
         .target(
             name: "MnemonicCore",
             dependencies: [
@@ -415,6 +416,8 @@ let package = Package(
                 "ReviewFeature",
                 "SyncFeature",
                 "TemplatesFeature",
+                // The Gemini key for hands-free's AI voice.
+                "MnemonicCore",
                 .product(name: "AnkiKit", package: "amgi"),
                 .product(name: "AnkiBackend", package: "amgi"),
                 .product(name: "AnkiClients", package: "amgi"),

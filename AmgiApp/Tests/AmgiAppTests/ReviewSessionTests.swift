@@ -847,6 +847,14 @@ import AnkiServices
         #expect(SpokenCardText.readable("5 &#8594; 6 &micro;g, 10<sup>9</sup>") == "5 → 6 \u{00B5}g, 10^9.")
     }
 
+    @Test func theAIVoiceGetsTheCardAsWrittenToRewrite() {
+        let front = #"<span class="cloze" data-ordinal="1">[...]</span> is the drug of choice for absence seizures"#
+        #expect(SpokenCardText.questionAsWritten(fromHTML: front) == "[...] is the drug of choice for absence seizures.",
+                "the blank stays a blank")
+        #expect(SpokenCardText.answerAsWritten(fromHTML: "Q?<hr id=answer>↑ PTH") == "↑ PTH.", "shorthand left for it to say")
+        #expect(SpokenCardText.answer(fromHTML: "Q?<hr id=answer>↑ PTH") == "increased PTH.")
+    }
+
     // MARK: - New cards learned in a filtered deck
 
     /// The engine credits an answer to the filtered deck the card sits in,
