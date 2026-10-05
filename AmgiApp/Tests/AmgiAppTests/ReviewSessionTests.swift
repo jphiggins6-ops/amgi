@@ -792,6 +792,14 @@ import AnkiServices
         #expect(SpokenCardText.answer(fromHTML: "<b>Whole</b> back") == "Whole back.", "no divider: all of it")
     }
 
+    @Test func aClozeAnswerIsJustTheRevealedClozeWithoutTheExtra() {
+        let back = #"The <span class="cloze" data-ordinal="1"><b>heart</b></span> pumps <span class="cloze-inactive">blood</span>.<br>"#
+            + ExtraFieldMarker.html + "Four chambers"
+        #expect(SpokenCardText.answer(fromHTML: back) == "heart.")
+        let basic = #"Q?<hr id=answer>Horner syndrome<br>"# + ExtraFieldMarker.html + "Extra notes"
+        #expect(SpokenCardText.answer(fromHTML: basic) == "Horner syndrome.", "the Extra is never read")
+    }
+
     @Test func whatTheCardDoesntShowIsntRead() {
         // `##"`: the hint link's `href="#"` would end a `#"` string.
         let front = ##"<div class="card"><span class="cloze">[...]</span> is the drug of choice<br><a class=hint href="#" onclick="this.style.display='none';return false;">Lecture Notes</a><div id="hint1" class=hint style="display: none">Hidden <div>nested</div> stuff</div></div>"##

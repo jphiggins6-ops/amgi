@@ -13,9 +13,11 @@ import ReviewCore
 /// Hands-free studying, for walking or a commute: each card is read aloud
 /// and answered by voice.
 ///
-/// The question is read; "show" reads the answer, or a rating said straight
-/// away reads the answer and then goes on with it. On the answer side,
-/// "again", "hard", "good" or "easy" rates it and the next card starts.
+/// The question is read; "show" turns the card over and reads just the
+/// answer (the revealed cloze, never the Extra). A rating said on the
+/// question side rates the card at once, without reading the answer. On
+/// the answer side, "again", "hard", "good" or "easy" rates it and the next
+/// card starts.
 /// "Repeat" reads the side again, "undo" takes the last answer back, and
 /// "stop" ends hands-free. Taps on the screen still work, and the reading
 /// follows them. It carries on with the screen locked (the app's background
@@ -112,10 +114,6 @@ final class HandsFreeController {
         }
         speaker.speed = ReviewPreferences.handsFreeSpeed
 
-        // A rating said on the question side, applied once the answer has
-        // been read.
-        var pendingRating: Rating?
-
         while !Task.isCancelled {
             if session.isFinished {
                 show(.finishing)
@@ -131,15 +129,15 @@ final class HandsFreeController {
             guard !Task.isCancelled else { return }
 
             if !session.showAnswer {
-                pendingRating = nil
                 show(.readingQuestion)
                 let question = Self.speakable(SpokenCardText.question(fromHTML: session.frontHTML))
                 switch await speakThenListen(question, then: .waitingToShow, session: session, listenAfter: true) {
                 case .heard(.reveal):
                     session.revealAnswer()
                 case .heard(.rate(let rating)):
-                    pendingRating = rating
+                    // Rated without hearing the answer: no need to read it.
                     session.revealAnswer()
+                    await rate(rating, session)
                 case .heard(.undo):
                     await undo(session)
                 case .heard(.stop):
@@ -154,11 +152,7 @@ final class HandsFreeController {
             } else {
                 show(.readingAnswer)
                 let answer = Self.speakable(SpokenCardText.answer(fromHTML: session.backHTML))
-                let rated = pendingRating
-                pendingRating = nil
-                switch await speakThenListen(answer, then: .waitingForRating, session: session, listenAfter: rated == nil) {
-                case .spoke:
-                    if let rated { await rate(rated, session) }
+                switch await speakThenListen(answer, then: .waitingForRating, session: session, listenAfter: true) {
                 case .heard(.rate(let rating)):
                     await rate(rating, session)
                 case .heard(.undo):
@@ -167,13 +161,12 @@ final class HandsFreeController {
                     end(problem: nil)
                     return
                 case .heard(.reveal), .heard(.repeatSide):
-                    // Read the answer again; a rating said earlier still stands.
-                    pendingRating = rated
+                    // Read the answer again.
                     continue
                 case .failed(let message):
                     end(problem: message)
                     return
-                case .changed, .cancelled:
+                case .changed, .spoke, .cancelled:
                     continue
                 }
             }

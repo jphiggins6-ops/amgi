@@ -34,17 +34,55 @@ public enum SpokenCardText {
         readable(html)
     }
 
-    /// The answer side without the question above Anki's
-    /// `<hr id=answer>`, so it isn't read twice. A side without that line,
-    /// like a cloze card's, which is the sentence with the answer in it, is
-    /// read whole.
+    /// Just the answer, not the card again. On a cloze card that's the
+    /// revealed cloze, or clozes, alone; otherwise what's below Anki's
+    /// `<hr id=answer>`, or the whole side without that line. The Extra
+    /// field (from `ExtraFieldMarker` on) is never read.
     public static func answer(fromHTML html: String) -> String {
-        let range = NSRange(html.startIndex..., in: html)
-        if let match = answerDivider.firstMatch(in: html, range: range),
-           let divider = Range(match.range, in: html) {
-            return readable(String(html[divider.upperBound...]))
+        var side = html
+        if let extra = side.range(of: ExtraFieldMarker.html) {
+            side = String(side[..<extra.lowerBound])
         }
-        return readable(html)
+        let clozes = revealedClozes(in: side)
+        if !clozes.isEmpty {
+            return clozes.map(readable).filter { !$0.isEmpty }.joined(separator: " ")
+        }
+        let range = NSRange(side.startIndex..., in: side)
+        if let match = answerDivider.firstMatch(in: side, range: range),
+           let divider = Range(match.range, in: side) {
+            return readable(String(side[divider.upperBound...]))
+        }
+        return readable(side)
+    }
+
+    /// The inner HTML of each answered cloze (`<span class="cloze">`), in
+    /// order. Spans nested inside one are counted, so it ends at its own
+    /// closing tag.
+    static func revealedClozes(in html: String) -> [String] {
+        var clozes: [String] = []
+        var searchFrom = html.startIndex
+        while let open = html.range(of: #"class="cloze""#, range: searchFrom..<html.endIndex),
+              let tagEnd = html.range(of: ">", range: open.upperBound..<html.endIndex) {
+            var depth = 1
+            var cursor = tagEnd.upperBound
+            var end: String.Index?
+            while depth > 0 {
+                let nextOpen = html.range(of: "<span", options: .caseInsensitive, range: cursor..<html.endIndex)
+                guard let nextClose = html.range(of: "</span>", options: .caseInsensitive, range: cursor..<html.endIndex) else { break }
+                if let nextOpen, nextOpen.lowerBound < nextClose.lowerBound {
+                    depth += 1
+                    cursor = nextOpen.upperBound
+                } else {
+                    depth -= 1
+                    cursor = nextClose.upperBound
+                    if depth == 0 { end = nextClose.lowerBound }
+                }
+            }
+            guard let end else { break }
+            clozes.append(String(html[tagEnd.upperBound..<end]))
+            searchFrom = cursor
+        }
+        return clozes
     }
 
     /// A rendered side as text to speak. Anything the card doesn't show is

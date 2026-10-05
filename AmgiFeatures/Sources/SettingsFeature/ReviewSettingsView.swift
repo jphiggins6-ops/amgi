@@ -140,7 +140,7 @@ struct ReviewSettingsView: View {
                     }
                 }
             }
-            SettingsFootnote("Start it from ⋯ while reviewing. Each card is read aloud: say “show” to hear the answer, then “again”, “hard”, “good” or “easy”. Rate straight away and the answer is read before the next card. “Repeat”, “undo” and “stop” work any time. With headphones you can talk over the reading; out of the speaker, wait for it to finish. It keeps going with the screen locked.")
+            SettingsFootnote("Start it from ⋯ while reviewing. Each question is read aloud: say “show” to turn the card over and hear just the answer (the Extra isn’t read), then “again”, “hard”, “good” or “easy”. Rate straight away and the card is rated without the answer being read. “Repeat”, “undo” and “stop” work any time. With headphones you can talk over the reading; out of the speaker, wait for it to finish. It keeps going with the screen locked.")
         }
     }
 
