@@ -8,6 +8,7 @@ import Foundation
 import OSLog
 import AppCore
 import MnemonicCore
+import ReviewCore
 
 /// A card as the AI voice reads it: its sides as written, for Gemini to
 /// rewrite, and as the iPhone voice reads them, for when there's no script.
@@ -15,6 +16,22 @@ struct VoiceCard: Sendable {
     let written: CardScript.Card
     let question: String
     let answer: String
+
+    /// The card from its rendered sides, the way hands-free mode reads
+    /// them, so a card made ready ahead is the one read later.
+    init(front: String, back: String, deckName: String) {
+        written = CardScript.Card(
+            question: SpokenCardText.questionAsWritten(fromHTML: front),
+            answer: SpokenCardText.answerAsWritten(fromHTML: back),
+            deckName: deckName
+        )
+        question = Self.speakable(SpokenCardText.question(fromHTML: front))
+        answer = Self.speakable(SpokenCardText.answer(fromHTML: back))
+    }
+
+    static func speakable(_ text: String) -> String {
+        text.isEmpty ? "Nothing to read on this side." : text
+    }
 }
 
 enum CardSide: Sendable {
@@ -34,6 +51,18 @@ final class AIVoiceRecorder {
     private var scripts: [URL: CardScript.Lines] = [:]
     /// Why the last card couldn't be done, until one is.
     private(set) var problem: String?
+
+    /// While Google's limit for the key holds, for the minute or the day:
+    /// no new work starts, so cards go straight to the iPhone voice. Shared
+    /// by every recorder, as the limit is.
+    private(set) static var pause: (until: Date, daily: Bool, reason: String)?
+
+    static var isPaused: Bool {
+        guard let pause else { return false }
+        if pause.until > Date() { return true }
+        Self.pause = nil
+        return false
+    }
 
     init() {
         @Dependency(\.cardVoice) var client
@@ -68,14 +97,29 @@ final class AIVoiceRecorder {
         return CardVoiceRecordings.recording(of: side == .question ? lines.question : lines.answer, voice: voice)
     }
 
+    /// Whether both sides of the card are recorded.
+    func isReady(_ card: VoiceCard, voice: String, rewrites: Bool) -> Bool {
+        recording(of: .question, for: card, voice: voice, rewrites: rewrites) != nil
+            && recording(of: .answer, for: card, voice: voice, rewrites: rewrites) != nil
+    }
+
+    /// Makes the card's script and recordings, and says whether both
+    /// sides are recorded after.
+    func make(_ card: VoiceCard, voice: String, rewrites: Bool) async -> Bool {
+        prepare(card, voice: voice, rewrites: rewrites)
+        await making[Self.key(card, voice: voice, rewrites: rewrites)]?.value
+        return isReady(card, voice: voice, rewrites: rewrites)
+    }
+
     /// Starts the card's script and recordings, unless they're made or
-    /// under way.
+    /// under way, or Google's limit holds.
     func prepare(_ card: VoiceCard, voice: String, rewrites: Bool) {
         let key = Self.key(card, voice: voice, rewrites: rewrites)
-        guard making[key] == nil,
-              recording(of: .question, for: card, voice: voice, rewrites: rewrites) == nil
-                || recording(of: .answer, for: card, voice: voice, rewrites: rewrites) == nil
-        else { return }
+        guard making[key] == nil, !isReady(card, voice: voice, rewrites: rewrites) else { return }
+        if Self.isPaused {
+            problem = Self.pause?.reason
+            return
+        }
         let client = self.client
         making[key] = Task {
             do {
@@ -96,10 +140,27 @@ final class AIVoiceRecorder {
                 problem = nil
             } catch {
                 problem = error.localizedDescription
+                Self.pauseIfLimited(error)
                 Log.review.error("The AI voice couldn't do a card: \(error.localizedDescription)")
             }
             making[key] = nil
         }
+    }
+
+    /// Holds new work back when Google says the key's limit is reached:
+    /// for a minute, or until its day ends at midnight in California.
+    private static func pauseIfLimited(_ error: any Error) {
+        guard case .limited(_, let daily)? = error as? CardVoiceError else { return }
+        let now = Date()
+        var until = now.addingTimeInterval(60)
+        if daily {
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = TimeZone(identifier: "America/Los_Angeles") ?? .current
+            if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now) {
+                until = calendar.startOfDay(for: tomorrow)
+            }
+        }
+        pause = (until: until, daily: daily, reason: error.localizedDescription)
     }
 
     /// The recording of a side, waiting up to `limit` for the card's work
@@ -127,6 +188,10 @@ final class AIVoiceRecorder {
     /// A line on its own, such as Settings' sample, recorded as it is.
     func recording(ofLine text: String, voice: String, waitingAtMost limit: Duration) async -> URL? {
         if let file = CardVoiceRecordings.recording(of: text, voice: voice) { return file }
+        if Self.isPaused {
+            problem = Self.pause?.reason
+            return nil
+        }
         let key = "line\n\(voice)\n\(text)"
         if making[key] == nil {
             let client = self.client
@@ -137,6 +202,7 @@ final class AIVoiceRecorder {
                     problem = nil
                 } catch {
                     problem = error.localizedDescription
+                    Self.pauseIfLimited(error)
                 }
                 making[key] = nil
             }

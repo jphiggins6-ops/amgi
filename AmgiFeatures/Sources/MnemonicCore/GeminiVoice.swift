@@ -68,8 +68,16 @@ enum GeminiAPI {
 
     private struct ErrorBody: Decodable {
         struct Detail: Decodable {
+            /// An `ErrorInfo` (with a reason) or a `QuotaFailure` (with
+            /// violations), among the details Google gives.
             struct Info: Decodable {
+                struct Violation: Decodable {
+                    let quotaId: String?
+                    let quotaMetric: String?
+                }
+
                 let reason: String?
+                let violations: [Violation]?
             }
 
             let message: String
@@ -105,6 +113,20 @@ enum GeminiAPI {
         guard let error = (try? JSONDecoder().decode(ErrorBody.self, from: body))?.error else {
             return .service("Gemini answered with HTTP \(statusCode).")
         }
+        if error.status == "RESOURCE_EXHAUSTED" || statusCode == 429 {
+            // Gemini's voice allows about 10 recordings a minute and 100 a
+            // day; which one ran out is in the quota's name.
+            let quotas = (error.details ?? []).flatMap { $0.violations ?? [] }
+                .flatMap { [$0.quotaId, $0.quotaMetric].compactMap { $0 } }
+            let daily = (quotas + [error.message]).contains {
+                let name = $0.lowercased().replacingOccurrences(of: "_", with: "")
+                return name.contains("perday") || name.contains("daily")
+            }
+            let advice = daily
+                ? "Gemini’s voice has made all the recordings Google allows this key today (about 100 on most accounts, roughly 50 cards). It starts again tomorrow; until then the iPhone voice reads."
+                : "Google asked for a pause: Gemini’s voice allows only about 10 recordings a minute. The iPhone voice reads for a minute."
+            return .limited("\(advice) Google says: “\(error.message)”", daily: daily)
+        }
         let reasons = Set((error.details ?? []).compactMap(\.reason))
         guard let advice = advice(reasons: reasons, status: error.status ?? "", message: error.message, statusCode: statusCode) else {
             return .service(error.message)
@@ -124,9 +146,6 @@ enum GeminiAPI {
         }
         if reasons.contains("SERVICE_DISABLED") || words.contains("has not been used in project") {
             return "The Gemini API is switched off in this key’s Google Cloud project. A new key made in Google AI Studio comes with it switched on."
-        }
-        if status == "RESOURCE_EXHAUSTED" || statusCode == 429 {
-            return "This key has used up what Gemini allows for now. Turning on billing in Google AI Studio lifts the free tier’s limit of a few recordings a day."
         }
         if reasons.contains("BILLING_DISABLED") || words.contains("billing") {
             return "Billing isn’t set up for this key’s project: turn it on in Google AI Studio."
@@ -397,13 +416,15 @@ public enum CardScript {
 public enum CardVoiceError: LocalizedError, Equatable {
     case noKey
     case service(String)
+    /// Google's limit for the key is reached, for the day or the minute.
+    case limited(String, daily: Bool)
     case unimplemented
 
     public var errorDescription: String? {
         switch self {
         case .noKey:
             "Add your Gemini key first: Settings → Review → AI Voice."
-        case .service(let message):
+        case .service(let message), .limited(let message, _):
             "Gemini: \(message)"
         case .unimplemented:
             "The AI voice isn't available here."

@@ -46,8 +46,8 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.handsFreeVoice))
     private var handsFreeVoice: String = ""
 
-    @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceForNewCards))
-    private var aiVoiceForNewCards: Bool = true
+    @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceCards))
+    private var aiVoiceCards: String = ReviewPreferences.aiVoiceCards.rawValue
 
     @Shared(.appStorage(ReviewPreferences.Keys.aiVoice))
     private var aiVoice: String = AIVoice.defaultVoice.rawValue
@@ -67,6 +67,7 @@ struct ReviewSettingsView: View {
     @State private var sampleProblem: String?
     @State private var recordingsSize: Int64 = 0
     @State private var confirmsDeletingRecordings = false
+    @State private var confirmsPreparing = false
 
     @Shared(.appStorage(ReviewPreferences.Keys.appIconBadge))
     private var appIconBadge: String = AppIconBadge.cardsLeft.rawValue
@@ -206,13 +207,29 @@ struct ReviewSettingsView: View {
     private var aiVoiceSection: some View {
         Group {
             SettingsSectionHeader(title: "AI Voice")
+                // On a view of its own: the group below has a dialog already.
+                .confirmationDialog(
+                    preparationQuestion,
+                    isPresented: $confirmsPreparing,
+                    titleVisibility: .visible
+                ) {
+                    Button(preparationButton) { preparation.start() }
+                    Button("Cancel", role: .cancel) { preparation.cancel() }
+                } message: {
+                    Text(preparationMessage)
+                }
             SettingsGroup {
-                SettingsToggleRow(
-                    title: "AI voice for new cards",
+                SettingsPickerRow(
+                    title: "AI voice for",
                     systemImage: "sparkles",
                     tone: .mature,
-                    isOn: Binding($aiVoiceForNewCards)
-                )
+                    selection: Binding($aiVoiceCards)
+                ) {
+                    Text("All cards").tag(AIVoiceCards.all.rawValue)
+                    Text(verbatim: "Cards added since \(ReviewPreferences.aiVoiceSince.formatted(date: .abbreviated, time: .omitted))")
+                        .tag(AIVoiceCards.added.rawValue)
+                    Text("No cards").tag(AIVoiceCards.off.rawValue)
+                }
                 SettingsSeparator()
                 SettingsButtonRow(
                     title: geminiKeyTitle,
@@ -232,7 +249,7 @@ struct ReviewSettingsView: View {
                         Text(verbatim: voice.title).tag(voice.rawValue)
                     }
                 }
-                .disabled(!aiVoiceForNewCards)
+                .disabled(aiVoiceIsOff)
                 SettingsSeparator()
                 SettingsToggleRow(
                     title: "Read questions naturally",
@@ -240,7 +257,7 @@ struct ReviewSettingsView: View {
                     tone: .learning,
                     isOn: Binding($aiVoiceRewrites)
                 )
-                .disabled(!aiVoiceForNewCards)
+                .disabled(aiVoiceIsOff)
                 SettingsSeparator()
                 SettingsButtonRow(
                     title: "Hear the AI Voice",
@@ -250,7 +267,9 @@ struct ReviewSettingsView: View {
                 ) {
                     hearAIVoice()
                 }
-                .disabled(!aiVoiceForNewCards || isMakingSample)
+                .disabled(aiVoiceIsOff || isMakingSample)
+                SettingsSeparator()
+                preparationRows
                 if recordingsSize > 0 {
                     SettingsSeparator()
                     SettingsButtonRow(
@@ -276,6 +295,16 @@ struct ReviewSettingsView: View {
             }) {
                 GeminiKeySheet()
             }
+            .onChange(of: preparation.phase) { _, phase in
+                switch phase {
+                case .confirming:
+                    confirmsPreparing = true
+                case .finished:
+                    recordingsSize = CardVoiceRecordings.size()
+                case .idle, .checking, .preparing:
+                    break
+                }
+            }
             .confirmationDialog(
                 "Delete the AI voice’s recordings?",
                 isPresented: $confirmsDeletingRecordings,
@@ -292,8 +321,68 @@ struct ReviewSettingsView: View {
             if let sampleProblem {
                 SettingsFootnote(sampleProblem)
             }
-            SettingsFootnote("Cards added from \(ReviewPreferences.aiVoiceSince.formatted(date: .long, time: .omitted)) on are read in a natural voice from Google Gemini; the cards you had before keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free, and kept on this iPhone: about $2 for every 1,000 cards, and twice that from January 2027. If it isn’t ready within a few seconds, the iPhone voice reads that card instead.")
+            if case .finished(let outcome) = preparation.phase {
+                SettingsFootnote(outcome)
+            }
+            SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or with Prepare Cards Now, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Google lets the Gemini voice make about 100 recordings a day on most accounts, roughly 50 cards; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it.")
         }
+    }
+
+    private var aiVoiceIsOff: Bool {
+        aiVoiceCards == AIVoiceCards.off.rawValue
+    }
+
+    private var preparation: CardVoicePreparation { .shared }
+
+    /// Prepare Cards Now, or how far it's got and Stop.
+    @ViewBuilder
+    private var preparationRows: some View {
+        switch preparation.phase {
+        case .checking:
+            SettingsButtonRow(title: "Checking Your Cards…", systemImage: "rectangle.stack", tone: .accent, isBusy: true) {}
+                .disabled(true)
+            SettingsSeparator()
+            stopPreparingRow
+        case .preparing(let done, let total):
+            SettingsButtonRow(title: "Preparing… \(done) of \(total)", systemImage: "rectangle.stack", tone: .accent, isBusy: true) {}
+                .disabled(true)
+            SettingsSeparator()
+            stopPreparingRow
+        case .idle, .confirming, .finished:
+            SettingsButtonRow(title: "Prepare Cards Now", systemImage: "rectangle.stack.badge.plus", tone: .accent) {
+                preparation.check()
+            }
+            .disabled(aiVoiceIsOff)
+        }
+    }
+
+    private var stopPreparingRow: some View {
+        SettingsButtonRow(
+            title: preparation.isStopping ? "Stopping…" : "Stop",
+            systemImage: "stop.circle",
+            tone: .danger,
+            isDestructive: true
+        ) {
+            preparation.stop()
+        }
+        .disabled(preparation.isStopping)
+    }
+
+    private var preparationQuestion: String {
+        guard case .confirming(let toDo, _) = preparation.phase else { return "Prepare the AI voice?" }
+        return "Prepare the AI voice for \(toDo) cards?"
+    }
+
+    private var preparationButton: String {
+        guard case .confirming(let toDo, _) = preparation.phase else { return "Prepare" }
+        return "Prepare \(toDo) Cards"
+    }
+
+    private var preparationMessage: String {
+        guard case .confirming(let toDo, let ready) = preparation.phase else { return "" }
+        let cost = String(format: "$%.2f", Double(toDo) * CardVoicePreparation.costPerCard)
+        let readyAlready = ready > 0 ? " \(ready) cards are ready already." : ""
+        return "About \(cost), paid to Google once.\(readyAlready) Google lets the Gemini voice make about 100 recordings a day on most accounts, so about 50 cards get done a day, about 5 a minute; it stops at the day’s limit, and you can carry on tomorrow. Keep Amgi open while it works."
     }
 
     private var geminiKeyTitle: String {

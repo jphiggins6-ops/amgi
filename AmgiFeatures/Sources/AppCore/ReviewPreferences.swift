@@ -38,7 +38,10 @@ public enum ReviewPreferences {
         public static let problemCardLapses = "review_pref_problem_card_lapses"
         public static let handsFreeSpeed = "review_pref_hands_free_speed"
         public static let handsFreeVoice = "review_pref_hands_free_voice"
+        /// The switch that came before `aiVoiceCards`, read to carry over
+        /// a choice of no AI voice.
         public static let aiVoiceForNewCards = "review_pref_ai_voice_for_new_cards"
+        public static let aiVoiceCards = "review_pref_ai_voice_cards"
         public static let aiVoice = "review_pref_ai_voice_gemini"
         public static let aiVoiceRewrites = "review_pref_ai_voice_rewrites"
         public static let aiVoiceSince = "review_pref_ai_voice_since"
@@ -57,10 +60,15 @@ public enum ReviewPreferences {
         return identifier.isEmpty ? nil : identifier
     }
 
-    /// Whether cards added since `aiVoiceSince` are read in the AI voice.
-    /// On unless switched off in Settings.
-    public static var aiVoiceForNewCards: Bool {
-        UserDefaults.standard.object(forKey: Keys.aiVoiceForNewCards) as? Bool ?? true
+    /// Which cards hands-free mode reads in the AI voice: all of them
+    /// unless set otherwise in Settings, or none when the switch that came
+    /// before this was turned off.
+    public static var aiVoiceCards: AIVoiceCards {
+        let defaults = UserDefaults.standard
+        if let chosen = defaults.string(forKey: Keys.aiVoiceCards).flatMap(AIVoiceCards.init(rawValue:)) {
+            return chosen
+        }
+        return defaults.object(forKey: Keys.aiVoiceForNewCards) as? Bool == false ? .off : .all
     }
 
     public static var aiVoice: AIVoice {
@@ -73,9 +81,10 @@ public enum ReviewPreferences {
         UserDefaults.standard.object(forKey: Keys.aiVoiceRewrites) as? Bool ?? true
     }
 
-    /// Cards added from this moment on are read in the AI voice; the deck
-    /// that was there before keeps the iPhone's, which costs nothing. It's
-    /// the first launch with the AI voice (`noteAIVoiceStart`).
+    /// With `AIVoiceCards.added`, cards added from this moment on are read
+    /// in the AI voice, and the deck that was there before keeps the
+    /// iPhone's, which costs nothing. It's the first launch with the AI
+    /// voice (`noteAIVoiceStart`).
     public static var aiVoiceSince: Date {
         noteAIVoiceStart()
         return Date(timeIntervalSince1970: UserDefaults.standard.double(forKey: Keys.aiVoiceSince))
@@ -117,7 +126,17 @@ public enum ReviewPreferences {
     }
 }
 
-/// The AI voice hands-free mode reads newly added cards in: one of
+/// Which cards hands-free mode reads in the AI voice.
+public enum AIVoiceCards: String, CaseIterable, Identifiable, Sendable {
+    case all
+    /// Cards added since `ReviewPreferences.aiVoiceSince`.
+    case added
+    case off
+
+    public var id: String { rawValue }
+}
+
+/// The AI voice hands-free mode reads cards in: one of
 /// Google Gemini's 30 voices, each with Google's word for how it sounds.
 public enum AIVoice: String, CaseIterable, Identifiable, Sendable {
     case achernar = "Achernar"
