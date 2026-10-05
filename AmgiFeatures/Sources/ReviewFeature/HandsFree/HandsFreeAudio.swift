@@ -17,23 +17,34 @@ import ReviewCore
 
 // MARK: - Speaking
 
-/// Reads text aloud, each run of a writing system in a voice for it, and
-/// returns once it has been read or reading was stopped.
+/// Reads text aloud, each run of a writing system in a voice for it, or
+/// plays a recording of it in the AI voice, and returns once it has been
+/// read or reading was stopped.
 @MainActor
 final class CardSpeaker {
     var speed: HandsFreeSpeed = .normal
+    /// The iPhone voice picked in Settings, for text in its language; the
+    /// best one installed when nil.
+    var preferredVoice: String? {
+        didSet { voices = [:] }
+    }
 
     private let synthesizer = AVSpeechSynthesizer()
     private let delegate = SpeechDelegate()
+    private var player: AVAudioPlayer?
+    private let playerDelegate = PlayerDelegate()
     private var continuation: CheckedContinuation<Void, Never>?
     /// What the current `speak` queued, so a late callback for something
     /// stopped earlier can't end the next one.
     private var queued: Set<ObjectIdentifier> = []
     private var last: ObjectIdentifier?
+    /// The voice for each language, chosen once.
+    private var voices: [String: AVSpeechSynthesisVoice] = [:]
 
     init() {
         synthesizer.delegate = delegate
         delegate.onEnd = Self.forwarding(to: self)
+        playerDelegate.onEnd = Self.forwardingPlayback(to: self)
     }
 
     func speak(_ text: String) async {
@@ -42,10 +53,14 @@ final class CardSpeaker {
         guard !segments.isEmpty else { return }
         await withTaskCancellationHandler {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                guard !Task.isCancelled else {
+                    continuation.resume()
+                    return
+                }
                 self.continuation = continuation
                 for segment in segments {
                     let utterance = AVSpeechUtterance(string: segment.text)
-                    utterance.voice = Self.voice(for: segment.script)
+                    utterance.voice = voice(for: segment.script)
                     utterance.rate = Self.rate(for: speed)
                     utterance.postUtteranceDelay = 0.05
                     queued.insert(ObjectIdentifier(utterance))
@@ -58,17 +73,53 @@ final class CardSpeaker {
         }
     }
 
-    /// Stops at once and lets a waiting `speak` return.
+    /// Plays a recording to the end, or until it's stopped. False when it
+    /// can't be played, so the text can be read out instead.
+    func play(_ recording: URL) async -> Bool {
+        stop()
+        guard let player = try? AVAudioPlayer(contentsOf: recording) else { return false }
+        player.enableRate = true
+        player.rate = Self.playbackRate(for: speed)
+        player.delegate = playerDelegate
+        self.player = player
+        var playable = true
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                guard !Task.isCancelled else {
+                    continuation.resume()
+                    return
+                }
+                self.continuation = continuation
+                if !player.play() {
+                    playable = false
+                    stop()
+                }
+            }
+        } onCancel: {
+            Self.stopSoon(self)
+        }
+        return playable
+    }
+
+    /// Stops at once and lets a waiting `speak` or `play` return.
     func stop() {
         if synthesizer.isSpeaking {
             synthesizer.stopSpeaking(at: .immediate)
         }
+        player?.stop()
+        player = nil
         finish()
     }
 
     fileprivate func ended(_ utterance: ObjectIdentifier, cancelled: Bool) {
         guard queued.contains(utterance) else { return }
         if cancelled || utterance == last { finish() }
+    }
+
+    fileprivate func playbackEnded(_ finished: ObjectIdentifier) {
+        guard let player, ObjectIdentifier(player) == finished else { return }
+        self.player = nil
+        finish()
     }
 
     private func finish() {
@@ -78,12 +129,28 @@ final class CardSpeaker {
         continuation = nil
     }
 
-    static func voice(for script: SpokenCardText.Script) -> AVSpeechSynthesisVoice? {
+    /// The voice for `script`: the one picked in Settings when it speaks
+    /// that language, otherwise the best one installed for it.
+    private func voice(for script: SpokenCardText.Script) -> AVSpeechSynthesisVoice? {
+        let language = Self.language(for: script)
+        if let remembered = voices[language] { return remembered }
+        let picked = preferredVoice
+            .flatMap { AVSpeechSynthesisVoice(identifier: $0) }
+            .flatMap { candidate in
+                HandsFreeVoices.languageCode(of: candidate.language) == HandsFreeVoices.languageCode(of: language)
+                    ? candidate : nil
+            }
+        let chosen = picked ?? HandsFreeVoices.best(for: language) ?? AVSpeechSynthesisVoice(language: language)
+        voices[language] = chosen
+        return chosen
+    }
+
+    static func language(for script: SpokenCardText.Script) -> String {
         switch script {
-        case .hangul: AVSpeechSynthesisVoice(language: "ko-KR")
-        case .japanese: AVSpeechSynthesisVoice(language: "ja-JP")
-        case .chinese: AVSpeechSynthesisVoice(language: "zh-CN")
-        case .other: AVSpeechSynthesisVoice(language: AVSpeechSynthesisVoice.currentLanguageCode())
+        case .hangul: "ko-KR"
+        case .japanese: "ja-JP"
+        case .chinese: "zh-CN"
+        case .other: AVSpeechSynthesisVoice.currentLanguageCode()
         }
     }
 
@@ -96,10 +163,26 @@ final class CardSpeaker {
         }
     }
 
+    /// A recording's speed: it's made at the AI voice's own pace.
+    static func playbackRate(for speed: HandsFreeSpeed) -> Float {
+        switch speed {
+        case .slow: 0.85
+        case .normal: 1
+        case .fast: 1.2
+        }
+    }
+
     nonisolated private static func forwarding(to speaker: CardSpeaker) -> @Sendable (ObjectIdentifier, Bool) -> Void {
         { [weak speaker] utterance, cancelled in
             guard let speaker else { return }
             Task { @MainActor in speaker.ended(utterance, cancelled: cancelled) }
+        }
+    }
+
+    nonisolated private static func forwardingPlayback(to speaker: CardSpeaker) -> @Sendable (ObjectIdentifier) -> Void {
+        { [weak speaker] player in
+            guard let speaker else { return }
+            Task { @MainActor in speaker.playbackEnded(player) }
         }
     }
 
@@ -119,6 +202,19 @@ private final class SpeechDelegate: NSObject, AVSpeechSynthesizerDelegate, @unch
 
     func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         onEnd?(ObjectIdentifier(utterance), true)
+    }
+}
+
+/// AVAudioPlayer's delegate, kept off the main actor like `SpeechDelegate`.
+private final class PlayerDelegate: NSObject, AVAudioPlayerDelegate, @unchecked Sendable {
+    var onEnd: (@Sendable (ObjectIdentifier) -> Void)?
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        onEnd?(ObjectIdentifier(player))
+    }
+
+    func audioPlayerDecodeErrorDidOccur(_ player: AVAudioPlayer, error: (any Error)?) {
+        onEnd?(ObjectIdentifier(player))
     }
 }
 

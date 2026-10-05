@@ -242,6 +242,8 @@ let package = Package(
         // Paste, which uses the same Extra field) share it without an edge
         // between them. Pending ideas live inside the notes themselves as HTML
         // comments — see MnemonicMarker — so there is no queue to persist.
+        // The other OpenAI calls made with the same key live here too:
+        // Explain (CardExplainer) and hands-free's AI voice (OpenAISpeech).
         .target(
             name: "MnemonicCore",
             dependencies: [

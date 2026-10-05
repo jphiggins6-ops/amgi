@@ -27,6 +27,10 @@ public enum AmgiRoot {
 
     @MainActor
     private static func bootstrapBody() {
+        // Cards added from the first launch with the AI voice are read in
+        // it; the deck that was there keeps the iPhone's voice.
+        ReviewPreferences.noteAIVoiceStart()
+
         // Multi-profile bootstrap: migrate legacy single-collection layout
         // into the default profile, then open the selected profile's
         // collection.

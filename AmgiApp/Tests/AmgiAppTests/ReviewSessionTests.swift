@@ -823,6 +823,30 @@ import AnkiServices
         #expect(SpokenCardText.segments("  ").isEmpty)
     }
 
+    @Test func shorthandIsReadTheWayAPersonSaysIt() {
+        #expect(SpokenCardText.spoken("↑ HR → ↓ CO") == "increased HR leads to decreased CO")
+        #expect(SpokenCardText.spoken("Give 5 mg/kg q6h") == "Give 5 milligrams per kilogram every 6 hours")
+        #expect(SpokenCardText.spoken("BP 120/80 mmHg") == "BP 120 over 80 millimeters of mercury")
+        #expect(SpokenCardText.spoken("HCO3- 22-28 mEq/L") == "bicarbonate 22 to 28 milliequivalents per liter", "an ion, not a range")
+        #expect(SpokenCardText.spoken("Ca²⁺ 8.5–10.5 mg/dL") == "calcium 8.5 to 10.5 milligrams per deciliter")
+        #expect(SpokenCardText.spoken("WBC 4.5×10⁹/L") == "WBC 4.5 times 10 to the 9 per liter")
+        #expect(SpokenCardText.spoken("45 yo pt w/ 3 wk h/o cough") == "45 year old patient with 3 weeks history of cough")
+        #expect(SpokenCardText.spoken("Tx: amoxicillin 500 mg tid x 10 d") == "treatment: amoxicillin 500 milligrams three times a day for 10 days")
+        #expect(SpokenCardText.spoken("K+ < 3.5, ANA (+)") == "potassium less than 3.5, ANA positive")
+        #expect(SpokenCardText.spoken("1 mg") == "1 milligram")
+    }
+
+    @Test func whatIsntShorthandIsReadAsWritten() {
+        for text in ["Type IV hypersensitivity", "COVID-19 and IL-6", "20/20 vision", "2 hours later", "Factor V Leiden", "x^2 & done."] {
+            #expect(SpokenCardText.spoken(text) == text)
+        }
+    }
+
+    @Test func aCardSideIsReadInFull() {
+        #expect(SpokenCardText.question(fromHTML: "<div>↑ PTH &rarr; ↑ Ca<sup>2+</sup></div>") == "increased PTH leads to increased calcium.")
+        #expect(SpokenCardText.readable("5 &#8594; 6 &micro;g, 10<sup>9</sup>") == "5 → 6 \u{00B5}g, 10^9.")
+    }
+
     // MARK: - New cards learned in a filtered deck
 
     /// The engine credits an answer to the filtered deck the card sits in,

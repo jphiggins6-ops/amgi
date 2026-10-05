@@ -150,6 +150,13 @@ public final class ReviewSession {
         currentQueuedCard?.card.id
     }
 
+    /// The card after this one, as its sides will show, once it has been
+    /// rendered ahead (`prefetchFollowingCard`): a guess, like that is. For
+    /// hands-free mode to get the card's voice ready while this one is read.
+    public var upcomingCard: (id: CardID, frontHTML: String, backHTML: String)? {
+        preparedNext.map { (id: $0.id, frontHTML: $0.card.frontHTML, backHTML: $0.card.renderedBackHTML) }
+    }
+
     // MARK: - Session progress
 
     /// With `showsEachCardOnce`, the day's cards: those done before this

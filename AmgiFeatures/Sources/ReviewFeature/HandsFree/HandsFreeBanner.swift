@@ -29,6 +29,12 @@ struct HandsFreeBanner: View {
                     .amgiFont(.caption)
                     .foregroundStyle(palette.textSecondary)
                     .lineLimit(3)
+                if controller.problem == nil, let voiceProblem = controller.voiceProblem {
+                    Text(verbatim: "The AI voice didn’t come through, so the iPhone voice is reading. \(voiceProblem)")
+                        .amgiFont(.caption)
+                        .foregroundStyle(palette.warning)
+                        .lineLimit(3)
+                }
             }
             .accessibilityElement(children: .combine)
             Spacer(minLength: 0)

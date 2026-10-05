@@ -22,6 +22,13 @@ import ReviewCore
 /// "stop" ends hands-free. Taps on the screen still work, and the reading
 /// follows them. It carries on with the screen locked (the app's background
 /// audio mode).
+///
+/// Cards added since the AI voice started (`ReviewPreferences.aiVoiceSince`)
+/// are read in it: each side is recorded by OpenAI the first time it's
+/// read, the next card's while this one is, and kept on the phone
+/// (`CardVoiceRecordings`), so it's paid for once. The deck that was there
+/// before is read in the iPhone's best voice, for free, as is anything
+/// whose recording doesn't come in time.
 @MainActor
 @Observable
 final class HandsFreeController {
@@ -40,15 +47,24 @@ final class HandsFreeController {
     private(set) var lastHeard: String?
     /// Why hands-free stopped by itself, when it did.
     private(set) var problem: String?
+    /// Why the AI voice couldn't record the last card, while the iPhone's
+    /// voice reads in its place.
+    private(set) var voiceProblem: String?
 
     var isOn: Bool { phase != .off }
 
     /// Made on first use: the review screen is rebuilt often, and most
     /// sessions never turn hands-free on.
     @ObservationIgnored private var voice: (speaker: CardSpeaker, listener: VoiceListener)?
+    @ObservationIgnored private var madeRecorder: AIVoiceRecorder?
     @ObservationIgnored private var loop: Task<Void, Never>?
     /// The reading and listening under way, so `stop()` can end it.
     @ObservationIgnored private var currentRace: Race?
+    /// The AI voice, nil when it's switched off. Read as hands-free starts.
+    @ObservationIgnored private var aiVoice: String?
+    /// Cards added from this moment on are recorded in the AI voice; nil
+    /// when it's off or there's no OpenAI key.
+    @ObservationIgnored private var aiVoiceSince: Date?
 
     private var speaker: CardSpeaker { audio.speaker }
     private var listener: VoiceListener { audio.listener }
@@ -57,6 +73,13 @@ final class HandsFreeController {
         if let voice { return voice }
         let made = (speaker: CardSpeaker(), listener: VoiceListener())
         voice = made
+        return made
+    }
+
+    private var recorder: AIVoiceRecorder {
+        if let madeRecorder { return madeRecorder }
+        let made = AIVoiceRecorder()
+        madeRecorder = made
         return made
     }
 
@@ -113,6 +136,10 @@ final class HandsFreeController {
             return
         }
         speaker.speed = ReviewPreferences.handsFreeSpeed
+        speaker.preferredVoice = ReviewPreferences.handsFreeVoice
+        aiVoice = ReviewPreferences.aiVoiceForNewCards ? ReviewPreferences.aiVoice.rawValue : nil
+        aiVoiceSince = aiVoice != nil && recorder.hasKey ? ReviewPreferences.aiVoiceSince : nil
+        voiceProblem = nil
 
         while !Task.isCancelled {
             if session.isFinished {
@@ -128,10 +155,16 @@ final class HandsFreeController {
             await waitForCardAudio(session)
             guard !Task.isCancelled else { return }
 
+            let recordsCard = recordsInAIVoice(session.currentCardId)
             if !session.showAnswer {
                 show(.readingQuestion)
                 let question = Self.speakable(SpokenCardText.question(fromHTML: session.frontHTML))
-                switch await speakThenListen(question, then: .waitingToShow, session: session, listenAfter: true) {
+                if recordsCard, let aiVoice {
+                    // Ready by the time the card turns over.
+                    recorder.prepare(Self.speakable(SpokenCardText.answer(fromHTML: session.backHTML)), voice: aiVoice)
+                }
+                prepareUpcomingCard(session)
+                switch await speakThenListen(question, recording: recordsCard, then: .waitingToShow, session: session, listenAfter: true) {
                 case .heard(.reveal):
                     session.revealAnswer()
                 case .heard(.rate(let rating)):
@@ -152,7 +185,8 @@ final class HandsFreeController {
             } else {
                 show(.readingAnswer)
                 let answer = Self.speakable(SpokenCardText.answer(fromHTML: session.backHTML))
-                switch await speakThenListen(answer, then: .waitingForRating, session: session, listenAfter: true) {
+                prepareUpcomingCard(session)
+                switch await speakThenListen(answer, recording: recordsCard, then: .waitingForRating, session: session, listenAfter: true) {
                 case .heard(.rate(let rating)):
                     await rate(rating, session)
                 case .heard(.undo):
@@ -176,7 +210,7 @@ final class HandsFreeController {
     /// Reads `text`, listening for a command: during the reading with
     /// headphones on, after it otherwise. With `listenAfter` off, reading
     /// to the end is itself the outcome. A tap that changes the card ends
-    /// it early either way.
+    /// it early either way. `recording`: see `read(_:recording:)`.
     ///
     /// The reading, the listening and the watch for taps race as plain
     /// tasks, and the first to finish wins (`Race`). A task group is the
@@ -185,6 +219,7 @@ final class HandsFreeController {
     /// region-based isolation checker does not understand how to check").
     private func speakThenListen(
         _ text: String,
+        recording: Bool,
         then waiting: Phase,
         session: ReviewSession,
         listenAfter: Bool
@@ -196,7 +231,7 @@ final class HandsFreeController {
         currentRace = race
 
         race.add(Task {
-            await self.speaker.speak(text)
+            await self.read(text, recording: recording)
             guard !race.isOver else { return }
             guard listenAfter else {
                 race.finish(.spoke)
@@ -298,6 +333,44 @@ final class HandsFreeController {
         }
         return nil
     }
+
+    // MARK: - Voices
+
+    /// Reads `text` in the AI voice when it's been recorded, or when it can
+    /// be within a few seconds (`recording`: a card added since the AI
+    /// voice started); in the iPhone's voice otherwise. A recording that
+    /// comes too late is still kept, for next time.
+    private func read(_ text: String, recording: Bool) async {
+        if let aiVoice {
+            let file = await recorder.recording(of: text, voice: aiVoice, make: recording, waitingAtMost: .seconds(6))
+            if recording { voiceProblem = recorder.problem }
+            guard !Task.isCancelled else { return }
+            if let file {
+                if await speaker.play(file) { return }
+                CardVoiceRecordings.discard(file)
+                guard !Task.isCancelled else { return }
+            }
+        }
+        await speaker.speak(text)
+    }
+
+    /// Whether a card's sides are recorded in the AI voice: it was added
+    /// since the AI voice started. A card's id is the moment it was added,
+    /// in milliseconds.
+    private func recordsInAIVoice(_ cardId: CardID?) -> Bool {
+        guard let aiVoiceSince, let cardId else { return false }
+        return Double(cardId.rawValue) / 1000 >= aiVoiceSince.timeIntervalSince1970
+    }
+
+    /// Starts recording the next card while this one is read, so there's
+    /// no wait for it.
+    private func prepareUpcomingCard(_ session: ReviewSession) {
+        guard let aiVoice, let next = session.upcomingCard, recordsInAIVoice(next.id) else { return }
+        recorder.prepare(Self.speakable(SpokenCardText.question(fromHTML: next.frontHTML)), voice: aiVoice)
+        recorder.prepare(Self.speakable(SpokenCardText.answer(fromHTML: next.backHTML)), voice: aiVoice)
+    }
+
+    // MARK: - Answers
 
     private func rate(_ rating: Rating, _ session: ReviewSession) async {
         guard !session.isAdvancing else { return }

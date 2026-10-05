@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import Foundation
 import AppCore
 import AppShared
 import Theme
@@ -41,6 +42,24 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.handsFreeSpeed))
     private var handsFreeSpeed: String = HandsFreeSpeed.normal.rawValue
 
+    @Shared(.appStorage(ReviewPreferences.Keys.handsFreeVoice))
+    private var handsFreeVoice: String = ""
+
+    @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceForNewCards))
+    private var aiVoiceForNewCards: Bool = true
+
+    @Shared(.appStorage(ReviewPreferences.Keys.aiVoice))
+    private var aiVoice: String = AIVoice.marin.rawValue
+
+    /// The iPhone voices installed for the phone's language.
+    @State private var iPhoneVoices: [HandsFreeVoiceChoice] = []
+    /// Made on the first "Hear" tap.
+    @State private var preview: HandsFreeVoicePreview?
+    @State private var isMakingSample = false
+    @State private var sampleProblem: String?
+    @State private var recordingsSize: Int64 = 0
+    @State private var confirmsDeletingRecordings = false
+
     @Shared(.appStorage(ReviewPreferences.Keys.appIconBadge))
     private var appIconBadge: String = AppIconBadge.cardsLeft.rawValue
 
@@ -54,6 +73,7 @@ struct ReviewSettingsView: View {
             appIconSection
             ProblemCardsSection()
             handsFreeSection
+            aiVoiceSection
             gesturesSection
             cardDisplaySection
             answerButtonsSection
@@ -139,8 +159,127 @@ struct ReviewSettingsView: View {
                         Text(verbatim: speed.title).tag(speed.rawValue)
                     }
                 }
+                SettingsSeparator()
+                SettingsPickerRow(
+                    title: "iPhone voice",
+                    systemImage: "waveform",
+                    tone: .info,
+                    selection: Binding($handsFreeVoice)
+                ) {
+                    Text("Best installed").tag("")
+                    ForEach(iPhoneVoices) { voice in
+                        Text(verbatim: voice.title).tag(voice.id)
+                    }
+                }
+                SettingsSeparator()
+                SettingsButtonRow(
+                    title: "Hear the iPhone Voice",
+                    systemImage: "play.circle",
+                    tone: .info
+                ) {
+                    let voice = handsFreeVoice.isEmpty ? nil : handsFreeVoice
+                    Task { await voicePreview.playIPhoneVoice(voice) }
+                }
+            }
+            // Here rather than on the section's Group, which would run it
+            // once for each view in it.
+            .task {
+                iPhoneVoices = HandsFreeVoices.choices()
+                // A voice deleted from the phone since it was picked.
+                if !handsFreeVoice.isEmpty, !iPhoneVoices.contains(where: { $0.id == handsFreeVoice }) {
+                    $handsFreeVoice.withLock { $0 = "" }
+                }
             }
             SettingsFootnote("Start it from ⋯ while reviewing. Each question is read aloud: say “show” to turn the card over and hear just the answer (the Extra isn’t read), then “again”, “hard”, “good” or “easy”. Rate straight away and the card is rated without the answer being read. “Repeat”, “undo” and “stop” work any time. With headphones you can talk over the reading; out of the speaker, wait for it to finish. It keeps going with the screen locked.")
+            SettingsFootnote("The iPhone voice reads every card the AI voice doesn’t, for free. For one that sounds far more natural, download a Premium or Enhanced voice, such as Ava or Zoe, in the Settings app: Accessibility → Read & Speak → Voices → English. Amgi uses the best one you have unless you pick one here.")
+        }
+    }
+
+    private var aiVoiceSection: some View {
+        Group {
+            SettingsSectionHeader(title: "AI Voice")
+            SettingsGroup {
+                SettingsToggleRow(
+                    title: "AI voice for new cards",
+                    systemImage: "sparkles",
+                    tone: .mature,
+                    isOn: Binding($aiVoiceForNewCards)
+                )
+                SettingsSeparator()
+                SettingsPickerRow(
+                    title: "Voice",
+                    systemImage: "person.wave.2",
+                    tone: .link,
+                    selection: Binding($aiVoice)
+                ) {
+                    ForEach(AIVoice.allCases) { voice in
+                        Text(verbatim: voice.title).tag(voice.rawValue)
+                    }
+                }
+                .disabled(!aiVoiceForNewCards)
+                SettingsSeparator()
+                SettingsButtonRow(
+                    title: "Hear the AI Voice",
+                    systemImage: "play.circle",
+                    tone: .mature,
+                    isBusy: isMakingSample
+                ) {
+                    hearAIVoice()
+                }
+                .disabled(!aiVoiceForNewCards || isMakingSample)
+                if recordingsSize > 0 {
+                    SettingsSeparator()
+                    SettingsButtonRow(
+                        title: "Delete Recordings (\(ByteCountFormatter.string(fromByteCount: recordingsSize, countStyle: .file)))",
+                        systemImage: "trash",
+                        tone: .danger,
+                        isDestructive: true
+                    ) {
+                        confirmsDeletingRecordings = true
+                    }
+                }
+            }
+            .task {
+                recordingsSize = CardVoiceRecordings.size()
+            }
+            .onDisappear {
+                preview?.stop()
+            }
+            .confirmationDialog(
+                "Delete the AI voice’s recordings?",
+                isPresented: $confirmsDeletingRecordings,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Recordings", role: .destructive) {
+                    CardVoiceRecordings.deleteAll()
+                    recordingsSize = 0
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("New cards are recorded again, and paid for again, the next time they’re read.")
+            }
+            if let sampleProblem {
+                SettingsFootnote(sampleProblem)
+            }
+            SettingsFootnote("Cards added from \(ReviewPreferences.aiVoiceSince.formatted(date: .long, time: .omitted)) on are read in a natural AI voice from OpenAI, with the OpenAI key from the Graveyard tab; the cards you had before keep the iPhone voice, for free. Each side is recorded the first time it’s read and kept on this iPhone, so it’s paid for once: about $2–3 for every 1,000 cards. If a recording doesn’t come within a few seconds, the iPhone voice reads that card instead.")
+        }
+    }
+
+    private var voicePreview: HandsFreeVoicePreview {
+        if let preview { return preview }
+        let made = HandsFreeVoicePreview()
+        preview = made
+        return made
+    }
+
+    private func hearAIVoice() {
+        isMakingSample = true
+        sampleProblem = nil
+        let voice = aiVoice
+        Task {
+            sampleProblem = await voicePreview.playAIVoice(voice)
+            isMakingSample = false
+            recordingsSize = CardVoiceRecordings.size()
         }
     }
 

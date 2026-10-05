@@ -37,12 +37,47 @@ public enum ReviewPreferences {
         public static let showTimeLeft = "review_pref_show_time_left"
         public static let problemCardLapses = "review_pref_problem_card_lapses"
         public static let handsFreeSpeed = "review_pref_hands_free_speed"
+        public static let handsFreeVoice = "review_pref_hands_free_voice"
+        public static let aiVoiceForNewCards = "review_pref_ai_voice_for_new_cards"
+        public static let aiVoice = "review_pref_ai_voice"
+        public static let aiVoiceSince = "review_pref_ai_voice_since"
         public static let appIconBadge = "review_pref_app_icon_badge"
         public static let appIconTurnsGreen = "review_pref_app_icon_turns_green"
     }
 
     public static var handsFreeSpeed: HandsFreeSpeed {
         UserDefaults.standard.string(forKey: Keys.handsFreeSpeed).flatMap(HandsFreeSpeed.init(rawValue:)) ?? .normal
+    }
+
+    /// The iPhone voice picked for hands-free mode, by identifier; nil for
+    /// the best one installed.
+    public static var handsFreeVoice: String? {
+        let identifier = UserDefaults.standard.string(forKey: Keys.handsFreeVoice) ?? ""
+        return identifier.isEmpty ? nil : identifier
+    }
+
+    /// Whether cards added since `aiVoiceSince` are read in the AI voice.
+    /// On unless switched off in Settings.
+    public static var aiVoiceForNewCards: Bool {
+        UserDefaults.standard.object(forKey: Keys.aiVoiceForNewCards) as? Bool ?? true
+    }
+
+    public static var aiVoice: AIVoice {
+        UserDefaults.standard.string(forKey: Keys.aiVoice).flatMap(AIVoice.init(rawValue:)) ?? .marin
+    }
+
+    /// Cards added from this moment on are read in the AI voice; the deck
+    /// that was there before keeps the iPhone's, which costs nothing. It's
+    /// the first launch with the AI voice (`noteAIVoiceStart`).
+    public static var aiVoiceSince: Date {
+        noteAIVoiceStart()
+        return Date(timeIntervalSince1970: UserDefaults.standard.double(forKey: Keys.aiVoiceSince))
+    }
+
+    /// Makes `now` the moment the AI voice starts from, unless there is one.
+    public static func noteAIVoiceStart(now: Date = Date()) {
+        guard UserDefaults.standard.object(forKey: Keys.aiVoiceSince) == nil else { return }
+        UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Keys.aiVoiceSince)
     }
 
     /// What the number on the app icon counts: reviews and new cards
@@ -72,6 +107,21 @@ public enum ReviewPreferences {
     /// Settings; the watch has no toggle and always gets the default.
     public static var defersRepeats: Bool {
         UserDefaults.standard.object(forKey: Keys.defersRepeats) as? Bool ?? true
+    }
+}
+
+/// The AI voice hands-free mode reads newly added cards in: one of
+/// OpenAI's. Marin and Cedar are the ones OpenAI calls its best.
+public enum AIVoice: String, CaseIterable, Identifiable, Sendable {
+    case marin, cedar, coral, sage, nova, shimmer, alloy, ash, ballad, echo, fable, onyx, verse
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .marin, .cedar: "\(rawValue.capitalized) (best)"
+        default: rawValue.capitalized
+        }
     }
 }
 
