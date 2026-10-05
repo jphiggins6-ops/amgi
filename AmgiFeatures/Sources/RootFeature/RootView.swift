@@ -84,8 +84,7 @@ public struct RootView: View {
         MainTabView(
             refreshID: refreshID,
             showReaderTab: showReaderTab,
-            onImport: { showImport = true },
-            onSelectStudyDeck: { pendingReviewDeckId = $0 }
+            onImport: { showImport = true }
         )
         .alert(
             "Couldn't switch profile",

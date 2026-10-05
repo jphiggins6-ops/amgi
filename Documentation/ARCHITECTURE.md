@@ -76,7 +76,7 @@ with no prefix (`AppCore`, `AppShared`, `ReviewCore`, `StatsCharts`).
 | **TemplatesFeature** | Card-template editor, template source editing, preview, and notetype field management. |
 | **ReviewFeature** | The review screen: WebKit card host, native renderer, flip chrome, rating bar, render-mode UI. |
 | **DecksFeature** | Deck list, deck detail, deck config with the FSRS simulator, profile picker. |
-| **ReaderFeature** | The EPUB and Anki-note readers, the offline dictionary lookup UI, and the Study landing screen. The only module that touches `ReaderDictionary`. |
+| **ReaderFeature** | The EPUB and Anki-note readers and the offline dictionary lookup UI. The only module that touches `ReaderDictionary`. |
 | **StatsFeature** | The statistics dashboard. |
 | **SyncFeature** | Sync coordinator, sync sheet, login, onboarding, sync toast. |
 | **SettingsFeature** | The Settings root and every screen it pushes to. The app's fan-in point. |

@@ -18,9 +18,12 @@ import SyncFeature
 /// Root tab bar. Pure layout: each tab wraps a feature view in a
 /// `NavigationStack`. `refreshID` (bumped by the host after sync / import /
 /// review) now only drives the tabs not yet on `CollectionStore` — Library
-/// and Study reload via the store's generation instead. All side effects are
+/// reloads via the store's generation instead. All side effects are
 /// forwarded to the host via closures or `\.startSync` so this view owns no
 /// I/O or sync state.
+///
+/// There's no Study tab: the Library's Reviews and New buttons, and its
+/// deck list, are where studying starts.
 ///
 /// `refreshID` is *handed to* the two tabs that reload from it, not applied as
 /// an `.id()`. As an `.id()` it discarded each tab's whole subtree — scroll
@@ -31,12 +34,11 @@ struct MainTabView: View {
     let refreshID: UUID
     let showReaderTab: Bool
     let onImport: () -> Void
-    let onSelectStudyDeck: (DeckID) -> Void
 
     @Environment(\.startSync) private var startSync
 
     private enum MainTab: Hashable {
-        case library, read, study, stats, graveyard
+        case library, read, stats, graveyard
     }
 
     @State private var selection: MainTab = .library
@@ -59,7 +61,7 @@ struct MainTabView: View {
                     }
                 }
             }
-            // 2. Reader and 3. Study both live in ReaderFeature.
+            // 2. Reader
             if showReaderTab {
                 Tab("Read", systemImage: "book", value: MainTab.read) {
                     NavigationStack {
@@ -67,18 +69,13 @@ struct MainTabView: View {
                     }
                 }
             }
-            Tab("Study", systemImage: "graduationcap", value: MainTab.study) {
-                NavigationStack {
-                    StudyLandingView(onSelectDeck: onSelectStudyDeck)
-                }
-            }
-            // 4. Stats
+            // 3. Stats
             Tab("Stats", systemImage: "chart.bar", value: MainTab.stats) {
                 NavigationStack {
                     StatsDashboardView(refreshID: refreshID)
                 }
             }
-            // 5. Graveyard — red- and orange-flagged cards, to fix or delete.
+            // 4. Graveyard — red- and orange-flagged cards, to fix or delete.
             Tab("Graveyard", systemImage: "flag.2.crossed", value: MainTab.graveyard) {
                 NavigationStack {
                     GraveyardView()
