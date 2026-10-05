@@ -49,6 +49,7 @@ public final class CardVoicePreparation {
         case dailyLimit(until: Date, message: String)
         case stopped
         case noConnection
+        case noKey
         /// Three cards in a row couldn't be done; the last one's reason.
         case problems(String)
 
@@ -58,11 +59,13 @@ public final class CardVoicePreparation {
             case .dailyLimit(let until, _):
                 let time = until.formatted(date: .omitted, time: .shortened)
                 let when = Calendar.current.isDateInToday(until) ? "at \(time)" : "tomorrow at \(time)"
-                return "Google’s daily limit reached. Carries on \(when)."
+                return "Google’s daily limit reached. Carries on \(when), or sooner if the limit is raised."
             case .stopped:
                 return "Stopped."
             case .noConnection:
                 return "No connection. Carries on the next time Amgi opens."
+            case .noKey:
+                return "No Gemini key."
             case .problems:
                 return "Stopped: three cards in a row couldn’t be done."
             }
@@ -72,15 +75,45 @@ public final class CardVoicePreparation {
         public var note: String {
             switch self {
             case .dailyLimit(_, let message):
-                return message + " Google’s day ends at midnight in California; the queue carries on by itself whenever Amgi is open after that."
+                return message + " Google’s day ends at midnight in California, and the queue carries on by itself once Amgi is open after that. If the limit is raised sooner (billing turned on, say), Try Again Now carries on straight away; Amgi also tries again by itself an hour after Google said no, while it’s open."
             case .stopped:
                 return "The rest stay queued, soonest due first. Carry On Now starts them again."
             case .noConnection:
                 return "The card that was being made stays first in line."
+            case .noKey:
+                return CardVoiceError.noKey.localizedDescription
             case .problems(let reason):
                 return reason
             }
         }
+    }
+
+    /// How many of the cards the AI voice reads have it: counted now and
+    /// then (`countIfStale`), and kept up as cards are made ready.
+    public struct Tally: Codable, Equatable, Sendable {
+        /// Cards with both sides recorded.
+        public fileprivate(set) var voiced: Int
+        /// The cards the AI voice reads that have words to read; suspended
+        /// cards aren't counted.
+        public let total: Int
+        /// What they were counted for: the voice, whether cards are
+        /// rewritten, and the cards added since when.
+        let voice: String
+        let rewrites: Bool
+        let since: Date
+        /// When they were last all counted.
+        let counted: Date
+
+        init(voiced: Int, total: Int, voice: String, rewrites: Bool, since: Date, counted: Date = Date()) {
+            self.voiced = voiced
+            self.total = total
+            self.voice = voice
+            self.rewrites = rewrites
+            self.since = since
+            self.counted = counted
+        }
+
+        public var remaining: Int { max(total - voiced, 0) }
     }
 
     public private(set) var phase: Phase = .idle
@@ -97,6 +130,16 @@ public final class CardVoicePreparation {
     @ObservationIgnored private var found: [CardID] = []
     @ObservationIgnored private var handsFreeIsOn = false
     @ObservationIgnored private var madeRecorder: AIVoiceRecorder?
+    /// Trying again by itself, while Google's daily limit holds.
+    @ObservationIgnored private var wakeUp: Task<Void, Never>?
+
+    /// The last count of the cards with the AI voice, kept between launches.
+    public private(set) var tally: Tally?
+    /// The cards are being counted.
+    public private(set) var isCounting = false
+    @ObservationIgnored private var counting: Task<Void, Never>?
+    /// Which count is the latest, so one stopped doesn't overwrite it.
+    @ObservationIgnored private var countingID = UUID()
 
     private var recorder: AIVoiceRecorder {
         if let madeRecorder { return madeRecorder }
@@ -116,7 +159,9 @@ public final class CardVoicePreparation {
         }
     }
 
-    private init() {}
+    private init() {
+        tally = Self.savedTally()
+    }
 
     public var isWorking: Bool {
         switch phase {
@@ -146,6 +191,16 @@ public final class CardVoicePreparation {
         func includes(_ cardId: CardID) -> Bool {
             Double(cardId.rawValue) / 1000 >= since.timeIntervalSince1970
         }
+
+        /// Whether `tally` counted these cards in this voice.
+        func matches(_ tally: Tally) -> Bool {
+            tally.voice == voice && tally.rewrites == rewrites
+                && abs(tally.since.timeIntervalSince(since)) < 1
+        }
+
+        func tally(voiced: Int, total: Int) -> Tally {
+            Tally(voiced: voiced, total: total, voice: voice, rewrites: rewrites, since: since)
+        }
     }
 
     // MARK: - Choosing a batch
@@ -163,6 +218,7 @@ public final class CardVoicePreparation {
             return
         }
         phase = .checking
+        stopCounting()
         CardVoiceLog.shared.add("Finding the cards due soonest that don’t have the AI voice")
         work = Task {
             let sides = CardVoiceSides()
@@ -183,6 +239,7 @@ public final class CardVoicePreparation {
                     }
                 }
                 found = toDo
+                keep(plan.tally(voiced: ready, total: ready + toDo.count))
                 CardVoiceLog.shared.add("Found \(toDo.count) cards without the AI voice; \(ready) have it")
                 phase = toDo.isEmpty
                     ? .finished("All \(ready) cards have the AI voice.")
@@ -213,21 +270,130 @@ public final class CardVoicePreparation {
         phase = queue.isEmpty ? .idle : .waiting(queued: queue.count, why: .stopped)
     }
 
+    // MARK: - Counting
+
+    /// The count for the voice and cards chosen now; nil until they're
+    /// counted.
+    public var currentTally: Tally? {
+        guard let tally, let plan = Plan.current, plan.matches(tally) else { return nil }
+        return tally
+    }
+
+    /// Counts the cards the AI voice reads and how many have it, unless
+    /// that was done in the last couple of minutes for the same voice and
+    /// cards, or cards are being made ready, which keeps the count up.
+    public func countIfStale() {
+        if let tally = currentTally, isWorking || tally.counted.timeIntervalSinceNow > -120 { return }
+        guard !isCounting else { return }
+        countAgain()
+    }
+
+    /// Counts the cards again now, in place of any count under way.
+    public func countAgain() {
+        guard let plan = Plan.current else { return }
+        // The check counts them on its way.
+        if case .checking = phase { return }
+        startCounting(plan)
+    }
+
+    /// The recordings are gone: no card has the AI voice.
+    public func recordingsDeleted() {
+        guard var updated = tally else { return }
+        updated.voiced = 0
+        keep(updated)
+    }
+
+    /// One more card has the AI voice, made just now by the queue or by
+    /// hands-free mode: counted without counting them all again.
+    func cardVoiced(voice: String, rewrites: Bool) {
+        guard var updated = tally, updated.voice == voice, updated.rewrites == rewrites else { return }
+        updated.voiced = min(updated.voiced + 1, updated.total)
+        keep(updated)
+    }
+
+    private func startCounting(_ plan: Plan) {
+        stopCounting()
+        let id = UUID()
+        countingID = id
+        isCounting = true
+        counting = Task {
+            let result = await tallyCards(plan)
+            guard countingID == id else { return }
+            counting = nil
+            isCounting = false
+            guard let counted = result else { return }
+            if counted.voiced != tally?.voiced || counted.total != tally?.total {
+                CardVoiceLog.shared.add("Counted: \(counted.voiced) of \(counted.total) cards have the AI voice")
+            }
+            keep(counted)
+        }
+    }
+
+    private func stopCounting() {
+        counting?.cancel()
+        counting = nil
+        countingID = UUID()
+        isCounting = false
+    }
+
+    /// How many of the cards the AI voice reads have it, by the same rules
+    /// as `check()`; nil when stopped, or when the cards can't be listed.
+    private func tallyCards(_ plan: Plan) async -> Tally? {
+        let sides = CardVoiceSides()
+        guard let ids = try? await sides.cardIds() else { return nil }
+        var total = 0
+        var voiced = 0
+        for cardId in ids where plan.includes(cardId) {
+            if Task.isCancelled { return nil }
+            guard let html = await sides.sides(of: cardId) else { continue }
+            let card = VoiceCard(front: html.front, back: html.back, deckName: "")
+            guard !card.written.question.isEmpty else { continue }
+            total += 1
+            if recorder.isReady(card, voice: plan.voice, rewrites: plan.rewrites) {
+                voiced += 1
+            }
+        }
+        return plan.tally(voiced: voiced, total: total)
+    }
+
+    private func keep(_ newTally: Tally) {
+        tally = newTally
+        UserDefaults.standard.set(try? JSONEncoder().encode(newTally), forKey: Self.tallyKey)
+    }
+
+    private static let tallyKey = "ai_voice_tally"
+
+    private static func savedTally() -> Tally? {
+        guard let data = UserDefaults.standard.data(forKey: tallyKey) else { return nil }
+        return try? JSONDecoder().decode(Tally.self, from: data)
+    }
+
     // MARK: - The queue
 
     /// Carries on with the cards queued, when nothing holds them up: when
-    /// Amgi opens, and when hands-free ends.
+    /// Amgi opens, when hands-free ends, and when Google's daily limit may
+    /// have passed.
     public func resume() {
         guard !isWorking, !queue.isEmpty else { return }
         if handsFreeIsOn { return }
         if let wait = Self.dailyLimitWait {
-            phase = .waiting(queued: queue.count, why: wait)
-            return
+            // The limit may have been raised since Google said no (billing
+            // turned on, say): an hour on, it's worth one more try.
+            if let reached = AIVoiceRecorder.dailyLimitReachedAt,
+               reached.timeIntervalSinceNow > -Self.retryAfter {
+                settle(.waiting(queued: queue.count, why: wait))
+                return
+            }
+            AIVoiceRecorder.clearPause()
+            CardVoiceLog.shared.add("Trying again: Google’s daily limit may have been raised since it last said no")
         }
         guard Plan.current != nil, recorder.hasKey else { return }
         CardVoiceLog.shared.add("Carrying on with \(queue.count) queued cards")
-        run(keepingScreenOn: false)
+        run(keepingScreenOn: true)
     }
+
+    /// How long after Google's daily limit it tries again by itself.
+    private static let retryAfter: TimeInterval = 60 * 60
 
     /// Starts again on the cards queued, with the screen kept on. Past
     /// Google's daily limit too, as it may have been raised (billing
@@ -257,7 +423,7 @@ public final class CardVoicePreparation {
     public func clearQueue() {
         guard !isWorking else { return }
         queue = []
-        phase = .idle
+        settle(.idle)
     }
 
     func handsFreeStarted() {
@@ -282,15 +448,39 @@ public final class CardVoicePreparation {
         guard !isWorking, let plan = Plan.current else { return }
         let total = queue.count
         guard total > 0 else { return }
+        guard recorder.hasKey else {
+            settle(.waiting(queued: total, why: .noKey))
+            return
+        }
         isStopping = false
-        phase = .preparing(done: 0, of: total)
+        settle(.preparing(done: 0, of: total))
         // A locked phone would pause the work.
         if keepingScreenOn { ScreenAwake.keep(.preparing) }
         work = Task {
             let ending = await workThroughQueue(plan: plan, total: total)
             ScreenAwake.keep(.preparing, false)
             isStopping = false
-            phase = ending
+            settle(ending)
+            // Made ready one by one meanwhile: counted again, to be sure.
+            countAgain()
+        }
+    }
+
+    /// Moves on to `newPhase`. While Google's daily limit holds, it tries
+    /// again by itself when the limit may have changed, if Amgi is open:
+    /// an hour after Google said no, or when Google's day ends.
+    private func settle(_ newPhase: Phase) {
+        phase = newPhase
+        wakeUp?.cancel()
+        wakeUp = nil
+        guard case .waiting(_, .dailyLimit(let until, _)) = newPhase else { return }
+        let retry = (AIVoiceRecorder.dailyLimitReachedAt ?? Date()).addingTimeInterval(Self.retryAfter)
+        let delay = max(min(until, retry).timeIntervalSinceNow, 0) + 5
+        wakeUp = Task {
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            wakeUp = nil
+            resume()
         }
     }
 

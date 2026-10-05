@@ -282,6 +282,22 @@ struct ReviewSettingsView: View {
                 }
                 .disabled(aiVoiceIsOff || isMakingSample)
                 SettingsSeparator()
+                if !aiVoiceIsOff {
+                    SettingsValueRow(
+                        title: "Cards voiced",
+                        value: voicedText,
+                        systemImage: "checkmark.circle",
+                        tone: .review
+                    )
+                    SettingsSeparator()
+                    SettingsValueRow(
+                        title: "Still to do",
+                        value: stillToDoText,
+                        systemImage: "hourglass",
+                        tone: .learning
+                    )
+                    SettingsSeparator()
+                }
                 preparationRows
                 SettingsSeparator()
                 SettingsValueRow(
@@ -308,9 +324,10 @@ struct ReviewSettingsView: View {
             }
             // Here rather than on the section's Group, which would run them
             // once for each view in it.
-            .task {
+            .task(id: "\(aiVoiceCards) \(aiVoice) \(aiVoiceRewrites)") {
                 recordingsSize = CardVoiceRecordings.size()
                 CardVoiceLog.shared.refresh()
+                preparation.countIfStale()
             }
             .onDisappear {
                 preview?.stop()
@@ -338,6 +355,7 @@ struct ReviewSettingsView: View {
                 Button("Delete Recordings", role: .destructive) {
                     CardVoiceRecordings.deleteAll()
                     recordingsSize = 0
+                    preparation.recordingsDeleted()
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
@@ -358,6 +376,9 @@ struct ReviewSettingsView: View {
                 }
             case .idle, .choosing:
                 EmptyView()
+            }
+            if let daysLeftNote {
+                SettingsFootnote(daysLeftNote)
             }
             SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or ahead of time with Prepare Cards, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Prepare Cards does the cards due soonest first, a batch at a time. Google lets the Gemini voice make about 100 recordings a day once billing is on for the key, roughly 50 cards, and only about 10 on its free tier; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it.")
         }
@@ -412,6 +433,36 @@ struct ReviewSettingsView: View {
         return false
     }
 
+    /// "52 of 903 (5%)": the cards with the AI voice, of those it reads.
+    private var voicedText: String {
+        guard let tally = preparation.currentTally else {
+            return preparation.isCounting ? "Counting…" : "Not counted yet"
+        }
+        guard tally.total > 0 else { return "0 of 0" }
+        let percent = Int((Double(tally.voiced) / Double(tally.total) * 100).rounded(.down))
+        return "\(tally.voiced) of \(tally.total) (\(percent)%)"
+    }
+
+    /// "851 cards": the cards it reads that don't have it yet.
+    private var stillToDoText: String {
+        guard let tally = preparation.currentTally else {
+            return preparation.isCounting ? "Counting…" : "Not counted yet"
+        }
+        return tally.remaining == 1 ? "1 card" : "\(tally.remaining) cards"
+    }
+
+    /// Roughly how long the cards still to do take at the key's daily
+    /// limit, once Google has said what it is: two recordings a card.
+    private var daysLeftNote: String? {
+        guard !aiVoiceIsOff,
+              let tally = preparation.currentTally, tally.remaining > 0,
+              let limit = CardVoiceLog.shared.dailyLimit, limit >= 2
+        else { return nil }
+        let perDay = limit / 2
+        let days = (tally.remaining + perDay - 1) / perDay
+        return "At this key’s limit of \(limit) recordings a day, two for each card, about \(perDay) cards are done a day: roughly \(days) \(days == 1 ? "day" : "days") for the \(tally.remaining) still to do."
+    }
+
     /// "37", or "37 of 100" once Google has said what the key's limit is.
     private var recordingsTodayText: String {
         let log = CardVoiceLog.shared
@@ -461,7 +512,7 @@ struct ReviewSettingsView: View {
     private var preparationMessage: String {
         guard case .choosing(_, let ready) = preparation.phase else { return "" }
         let readyAlready = ready > 0 ? "\(ready) cards are ready already. " : ""
-        return "\(readyAlready)They’re done soonest due first: what’s due now, then each day’s reviews and new cards, so the cards you’ll see next are ready first. Google lets the Gemini voice do about 50 cards a day; a bigger batch carries on by itself each day Amgi is open, and waits while hands-free runs. Keep Amgi open while it works: the screen stays on."
+        return "\(readyAlready)They’re done soonest due first: what’s due now, then each day’s reviews and new cards, so the cards you’ll see next are ready first. Google lets the Gemini voice do about 50 cards a day once billing is on for the key, about 5 on its free tier; a bigger batch carries on by itself each day Amgi is open, and waits while hands-free runs. Keep Amgi open while it works: the screen stays on."
     }
 
     private var geminiKeyTitle: String {

@@ -83,10 +83,19 @@ final class AIVoiceRecorder {
         pause = nil
         UserDefaults.standard.removeObject(forKey: pausedUntilKey)
         UserDefaults.standard.removeObject(forKey: pauseReasonKey)
+        UserDefaults.standard.removeObject(forKey: pausedAtKey)
+    }
+
+    /// When Google last said the day's limit was reached, while that
+    /// holds; nil when it isn't known.
+    static var dailyLimitReachedAt: Date? {
+        let at = UserDefaults.standard.double(forKey: pausedAtKey)
+        return at > 0 ? Date(timeIntervalSince1970: at) : nil
     }
 
     private static let pausedUntilKey = "ai_voice_paused_until"
     private static let pauseReasonKey = "ai_voice_pause_reason"
+    private static let pausedAtKey = "ai_voice_paused_at"
 
     init() {
         @Dependency(\.cardVoice) var client
@@ -169,6 +178,11 @@ final class AIVoiceRecorder {
                     log.countRecording()
                 }
                 log.add("Ready: \(label)", .done)
+                #if canImport(UIKit)
+                if self.isReady(card, voice: voice, rewrites: rewrites) {
+                    CardVoicePreparation.shared.cardVoiced(voice: voice, rewrites: rewrites)
+                }
+                #endif
                 problem = nil
                 lastError = nil
             } catch {
@@ -206,6 +220,7 @@ final class AIVoiceRecorder {
         if daily {
             UserDefaults.standard.set(until.timeIntervalSince1970, forKey: pausedUntilKey)
             UserDefaults.standard.set(error.localizedDescription, forKey: pauseReasonKey)
+            UserDefaults.standard.set(now.timeIntervalSince1970, forKey: pausedAtKey)
         }
     }
 
@@ -360,6 +375,11 @@ public final class CardVoiceLog {
         }
         recordingsToday += 1
         defaults.set(recordingsToday, forKey: Self.usageCountKey)
+        // Past the limit Google gave: it's been raised, billing turned on, say.
+        if let limit = dailyLimit, recordingsToday > limit {
+            dailyLimit = nil
+            defaults.removeObject(forKey: Self.dailyLimitKey)
+        }
     }
 
     func noteDailyLimit(_ limit: Int?) {

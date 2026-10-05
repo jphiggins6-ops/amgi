@@ -70,6 +70,11 @@ public final class CardVoiceSides: Sendable {
         return ordered
     }
 
+    /// Every card that isn't suspended, in no particular order.
+    public func cardIds() async throws -> [CardID] {
+        try await cards.search("-is:suspended")
+    }
+
     /// The card's question side and answer side, nil when it can't be
     /// rendered. Off the main actor, like a review's.
     public func sides(of cardId: CardID) async -> (front: String, back: String)? {
