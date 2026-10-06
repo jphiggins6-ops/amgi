@@ -18,9 +18,12 @@ import UniformTypeIdentifiers
 /// source, so editing never deletes formatting or pictures. See `FieldText`.
 /// No `NSAttributedString` HTML parsing: that path is crash-prone.
 ///
-/// A picture pasted into the field (Paste in the menu, or ⌘V) is stored as
-/// media and its tag put where the cursor is; a field edited as plain text
-/// is edited as HTML from then on, to hold it.
+/// Pictures show as themselves, not as their `<img>` tags, which are
+/// written back as they were (`FieldPictures`); one whose file isn't in the
+/// media folder shows as its tag. A picture pasted into the field (Paste in
+/// the menu, or ⌘V) is stored as media and shown where the cursor is; a
+/// field edited as plain text is edited as HTML from then on, to hold it.
+/// Copy and Cut keep a picture's tag, so it pastes as the picture again.
 ///
 /// With `clozeTools`, for the field a cloze note's deletions go in, the bar
 /// above the keyboard starts with them: Cloze hides the selection on a card
@@ -31,6 +34,8 @@ struct RichNoteFieldEditor: UIViewRepresentable {
     @Binding var htmlText: String
     var preservesSourceHTML = false
     var clozeTools = false
+    /// Takes the keyboard as it appears: the next note's first field.
+    var focusOnAppear = false
 
     static func normalizedStoredHTML(_ text: String) -> String {
         Coordinator.normalizedStoredHTML(from: text)
@@ -65,6 +70,14 @@ struct RichNoteFieldEditor: UIViewRepresentable {
         textView.onPastePictures = { [weak coordinator] pictures in
             coordinator?.pastePictures(pictures)
         }
+        textView.onPasteMarkup = { [weak coordinator] markup in
+            coordinator?.insertMarkup(markup)
+        }
+        textView.copiedSource = { [weak coordinator, weak textView] in
+            guard let coordinator, let textView else { return nil }
+            return coordinator.copiedSource(in: textView)
+        }
+        textView.becomesFirstResponderOnAppear = focusOnAppear
         // Bold, italic and the rest are for HTML: shown once a pasted
         // picture turns a plain-text field into HTML.
         coordinator.rebuildToolbar = { [weak coordinator] textView in
@@ -85,9 +98,10 @@ struct RichNoteFieldEditor: UIViewRepresentable {
         context.coordinator.attach(textView: textView)
         textView.inputAccessoryView = makeInputToolbar(for: textView, coordinator: context.coordinator)
 
-        textView.text = displayText(for: htmlText, editsSource: context.coordinator.editsSource)
+        let display = displayText(for: htmlText, editsSource: context.coordinator.editsSource)
+        context.coordinator.show(display, in: textView)
         context.coordinator.lastRenderedValue = htmlText
-        context.coordinator.lastPlainText = textView.text ?? ""
+        context.coordinator.lastPlainText = display
         context.coordinator.refreshClozeTools()
         return textView
     }
@@ -110,11 +124,8 @@ struct RichNoteFieldEditor: UIViewRepresentable {
         guard htmlText != context.coordinator.lastRenderedValue else { return }
 
         let displayedText = displayText(for: htmlText, editsSource: context.coordinator.editsSource)
-        if uiView.text != displayedText {
-            let selected = uiView.selectedRange
-            uiView.text = displayedText
-            let maxLoc = max(0, min(selected.location, displayedText.utf16.count))
-            uiView.selectedRange = NSRange(location: maxLoc, length: 0)
+        if context.coordinator.source(of: uiView) != displayedText {
+            context.coordinator.show(displayedText, in: uiView)
         }
         context.coordinator.lastRenderedValue = htmlText
         context.coordinator.lastPlainText = displayedText
@@ -156,11 +167,12 @@ struct RichNoteFieldEditor: UIViewRepresentable {
 
         func textViewDidEndEditing(_ textView: UITextView) {
             isEditing = false
-            commit(textView.text ?? "")
+            commit(source(of: textView))
         }
 
         func textViewDidChange(_ textView: UITextView) {
-            commit(textView.text ?? "")
+            commit(source(of: textView))
+            showPicturesTyped(in: textView)
             Self.keepCaretVisible(in: textView)
         }
 
@@ -189,7 +201,117 @@ struct RichNoteFieldEditor: UIViewRepresentable {
         func insert(_ string: String) {
             guard let textView, let range = textView.selectedTextRange else { return }
             textView.replace(range, withText: string)
-            commit(textView.text ?? "")
+            commit(source(of: textView))
+            showPicturesTyped(in: textView)
+        }
+
+        // MARK: Pictures
+
+        /// What the editor's text is set in, the pictures among it too.
+        var textAttributes: [NSAttributedString.Key: Any] {
+            [.font: UIFont.preferredFont(forTextStyle: .body), .foregroundColor: UIColor.label]
+        }
+
+        /// Shows `display` in the text view, each picture whose file is in
+        /// the media folder as the picture, with the cursor at `caret` (an
+        /// offset in `display`) or where it was.
+        func show(_ display: String, in textView: UITextView, caret: Int? = nil) {
+            let previous = textView.selectedRange
+            let shown = rendered(display)
+            textView.attributedText = shown
+            textView.typingAttributes = textAttributes
+            let location: Int
+            if let caret {
+                let upToCaret = (display as NSString).substring(to: min(max(caret, 0), (display as NSString).length))
+                location = rendered(upToCaret).length
+            } else {
+                location = previous.location
+            }
+            textView.selectedRange = NSRange(location: min(max(location, 0), shown.length), length: 0)
+        }
+
+        /// The field's text with each picture shown back as its tag.
+        func source(of textView: UITextView) -> String {
+            guard let shown = textView.attributedText else { return textView.text ?? "" }
+            return Self.source(of: shown)
+        }
+
+        /// The selection with its pictures as their tags, for Copy and Cut;
+        /// nil when there's no picture in it, for the usual copy.
+        func copiedSource(in textView: UITextView) -> String? {
+            let selected = textView.selectedRange
+            guard selected.length > 0, let shown = textView.attributedText,
+                  NSMaxRange(selected) <= shown.length else { return nil }
+            let part = shown.attributedSubstring(from: selected)
+            guard part.string.contains("\u{FFFC}") else { return nil }
+            return Self.source(of: part)
+        }
+
+        private static func source(of shown: NSAttributedString) -> String {
+            let string = shown.string as NSString
+            var result = ""
+            var start = 0
+            for index in 0..<string.length where string.character(at: index) == 0xFFFC {
+                result += string.substring(with: NSRange(location: start, length: index - start))
+                // A stand-in for a picture that's gone has nothing to keep.
+                if let picture = shown.attribute(.attachment, at: index, effectiveRange: nil) as? PictureAttachment {
+                    result += picture.tag
+                }
+                start = index + 1
+            }
+            return result + string.substring(from: start)
+        }
+
+        /// `display` with each picture whose file is here in place of its
+        /// tag. In plain text a tag is only typed text, and stays so.
+        private func rendered(_ display: String) -> NSAttributedString {
+            let attributes = textAttributes
+            let result = NSMutableAttributedString(string: display, attributes: attributes)
+            guard editsSource else { return result }
+            for tag in FieldPictures.tags(in: display).reversed() {
+                guard let image = picture(named: tag.filename) else { continue }
+                let shown = NSMutableAttributedString(attachment: PictureAttachment(tag: tag.tag, image: image))
+                shown.addAttributes(attributes, range: NSRange(location: 0, length: shown.length))
+                result.replaceCharacters(in: tag.range, with: shown)
+            }
+            return result
+        }
+
+        /// Pictures read from the media folder, by file, made small enough
+        /// to show; nil for one that isn't there. Each is read once.
+        private var loadedPictures: [String: UIImage?] = [:]
+
+        private func picture(named filename: String) -> UIImage? {
+            if let known = loadedPictures[filename] { return known }
+            let media = mediaClient
+            // As named, or with its %20s and the like read, as some decks
+            // write them.
+            let names = [filename, filename.removingPercentEncoding].compactMap { $0 }
+            let image = names.lazy
+                .compactMap { name in media.localURL(name).flatMap { UIImage(contentsOfFile: $0.path) } }
+                .first
+                .map(PictureAttachment.shrunk)
+            loadedPictures[filename] = .some(image)
+            return image
+        }
+
+        /// An `<img>` tag pasted or typed in as text shows its picture,
+        /// once it's whole and its file is here.
+        private func showPicturesTyped(in textView: UITextView) {
+            // Not in the middle of composing a character, as for Korean.
+            guard editsSource, textView.markedTextRange == nil else { return }
+            let text = textView.text ?? ""
+            guard text.range(of: "<img", options: .caseInsensitive) != nil,
+                  FieldPictures.tags(in: text).contains(where: { picture(named: $0.filename) != nil })
+            else { return }
+            // Once the typing or paste is through.
+            Task { @MainActor [weak self, weak textView] in
+                guard let self, let textView, textView.markedTextRange == nil else { return }
+                let shown = textView.attributedText ?? NSAttributedString()
+                let caret = min(textView.selectedRange.location, shown.length)
+                let upToCaret = shown.attributedSubstring(from: NSRange(location: 0, length: caret))
+                self.show(self.source(of: textView), in: textView, caret: (Self.source(of: upToCaret) as NSString).length)
+            }
         }
 
         /// Pasted pictures, each stored as media, their tags put where the
@@ -238,8 +360,8 @@ struct RichNoteFieldEditor: UIViewRepresentable {
         }
 
         func removeCloze() {
-            guard let textView, let cloze = currentCloze else { return }
-            apply(ClozeEditing.removing(cloze, in: textView.text ?? ""))
+            guard let cloze = currentCloze else { return }
+            apply(ClozeEditing.removing(cloze))
         }
 
         func renumberClozes() {
@@ -290,19 +412,28 @@ struct RichNoteFieldEditor: UIViewRepresentable {
         }
 
         /// A cloze button's change, made through the text view so Undo
-        /// takes it back.
+        /// takes it back, the last change first so the earlier offsets
+        /// still hold.
         private func apply(_ edit: ClozeEditing.Edit) {
             guard let textView else { return }
-            if edit.range.length > 0 || !edit.replacement.isEmpty,
-               let start = textView.position(from: textView.beginningOfDocument, offset: edit.range.location),
-               let end = textView.position(from: start, offset: edit.range.length),
-               let range = textView.textRange(from: start, to: end) {
-                textView.replace(range, withText: edit.replacement)
+            for change in edit.changes.sorted(by: { $0.range.location > $1.range.location }) {
+                replace(change.range, with: change.replacement, in: textView)
             }
             textView.selectedRange = edit.selection
-            commit(textView.text ?? "")
+            commit(source(of: textView))
             refreshClozeTools()
             Self.keepCaretVisible(in: textView)
+        }
+
+        /// `replacement` in place of `range`, through the text view so Undo
+        /// takes it back; pictures outside `range` stay as they are.
+        private func replace(_ range: NSRange, with replacement: String, in textView: UITextView) {
+            guard range.length > 0 || !replacement.isEmpty,
+                  let start = textView.position(from: textView.beginningOfDocument, offset: range.location),
+                  let end = textView.position(from: start, offset: range.length),
+                  let textRange = textView.textRange(from: start, to: end)
+            else { return }
+            textView.replace(textRange, withText: replacement)
         }
 
         /// `markup` where the cursor is, in place of any selection. A field
@@ -319,57 +450,47 @@ struct RichNoteFieldEditor: UIViewRepresentable {
                     replacing: textView.selectedRange
                 )
                 editsSource = true
-                textView.text = inserted.display
-                textView.selectedRange = NSRange(location: inserted.caret, length: 0)
+                show(inserted.display, in: textView, caret: inserted.caret)
                 commit(inserted.display)
                 rebuildToolbar?(textView)
             }
             Self.keepCaretVisible(in: textView)
         }
 
+        /// The selection between `prefix` and `suffix`, which are put either
+        /// side of it, so a picture in it stays.
         func wrapSelection(prefix: String, suffix: String) {
             guard let textView else { return }
             let selected = textView.selectedRange
-            let original = textView.text ?? ""
-            let source = original as NSString
-            let selectedText = source.substring(with: selected)
-            let replacement = "\(prefix)\(selectedText)\(suffix)"
-            let updated = source.replacingCharacters(in: selected, with: replacement)
-            textView.text = updated
-
-            if selected.length == 0 {
-                let cursor = selected.location + (prefix as NSString).length
-                textView.selectedRange = NSRange(location: cursor, length: 0)
-            } else {
-                let rangeStart = selected.location + (prefix as NSString).length
-                textView.selectedRange = NSRange(location: rangeStart, length: selected.length)
-            }
-
-            commit(updated)
+            replace(NSRange(location: NSMaxRange(selected), length: 0), with: suffix, in: textView)
+            replace(NSRange(location: selected.location, length: 0), with: prefix, in: textView)
+            textView.selectedRange = NSRange(
+                location: selected.location + (prefix as NSString).length,
+                length: selected.length
+            )
+            commit(source(of: textView))
         }
 
+        /// Bold, italic and the like taken out of the selection (or the
+        /// whole field, with nothing selected), tag by tag, so pictures stay.
         func clearFormattingInSelection() {
             guard let textView else { return }
             let selected = textView.selectedRange
-            let original = textView.text ?? ""
-            let source = original as NSString
-
-            let targetRange: NSRange
-            if selected.length > 0 {
-                targetRange = selected
-            } else {
-                targetRange = NSRange(location: 0, length: source.length)
+            let text = textView.text ?? ""
+            let target = selected.length > 0 ? selected : NSRange(location: 0, length: (text as NSString).length)
+            let formatting = Self.inlineFormatting.matches(in: text, range: target).map(\.range)
+            for range in formatting.reversed() {
+                replace(range, with: "", in: textView)
             }
-
-            let target = source.substring(with: targetRange)
-            let cleaned = Self.removeInlineHTMLFormatting(from: target)
-            let updated = source.replacingCharacters(in: targetRange, with: cleaned)
-            textView.text = updated
-
-            let cursor = targetRange.location + (cleaned as NSString).length
-            textView.selectedRange = NSRange(location: cursor, length: 0)
-            commit(updated)
+            let removed = formatting.reduce(0) { $0 + $1.length }
+            textView.selectedRange = NSRange(location: NSMaxRange(target) - removed, length: 0)
+            commit(source(of: textView))
         }
+
+        private static let inlineFormatting = try! NSRegularExpression(
+            pattern: "</?(?:b|strong|i|em|u|s|strike|del)>|</?font[^>]*>|</?span[^>]*>",
+            options: [.caseInsensitive]
+        )
 
         static func normalizedStoredHTML(from text: String) -> String {
             guard text.localizedCaseInsensitiveContains("anki-mathjax") else { return text }
@@ -664,23 +785,6 @@ private extension RichNoteFieldEditor.Coordinator {
             .replacingOccurrences(of: #"^\n*"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"\n*$"#, with: "", options: .regularExpression)
     }
-
-    static func removeInlineHTMLFormatting(from text: String) -> String {
-        var output = text
-        let patterns = [
-            "(?i)</?(b|strong|i|em|u|s|strike|del)>",
-            "(?i)</?font[^>]*>",
-            "(?i)</?span[^>]*>"
-        ]
-        for pattern in patterns {
-            output = output.replacingOccurrences(
-                of: pattern,
-                with: "",
-                options: .regularExpression
-            )
-        }
-        return output
-    }
 }
 
 // MARK: - Pasting pictures
@@ -691,6 +795,34 @@ private extension RichNoteFieldEditor.Coordinator {
 /// caption pastes as the picture, as with the editor's Paste button.
 private final class PictureTextView: UITextView {
     var onPastePictures: (([Data]) -> Void)?
+    /// Text with a picture's `<img>` tag in it, from Copy in a field: put
+    /// in as HTML, so the picture shows.
+    var onPasteMarkup: ((String) -> Void)?
+    /// The selection with its pictures as tags; nil without any.
+    var copiedSource: (() -> String?)?
+    var becomesFirstResponderOnAppear = false
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        guard window != nil, becomesFirstResponderOnAppear else { return }
+        becomesFirstResponderOnAppear = false
+        // Once the form around it has settled.
+        Task { @MainActor [weak self] in
+            self?.becomeFirstResponder()
+        }
+    }
+
+    override func copy(_ sender: Any?) {
+        guard let source = copiedSource?() else { return super.copy(sender) }
+        UIPasteboard.general.string = source
+    }
+
+    override func cut(_ sender: Any?) {
+        guard let source = copiedSource?(), let selection = selectedTextRange else { return super.cut(sender) }
+        UIPasteboard.general.string = source
+        replace(selection, withText: "")
+        delegate?.textViewDidChange?(self)
+    }
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
         if action == #selector(UIResponderStandardEditActions.paste(_:)),
@@ -708,6 +840,11 @@ private final class PictureTextView: UITextView {
                 onPastePictures(pictures)
                 return
             }
+        }
+        if let onPasteMarkup, pasteboard.hasStrings, let text = pasteboard.string,
+           !FieldPictures.tags(in: text).isEmpty {
+            onPasteMarkup(text)
+            return
         }
         super.paste(sender)
     }
@@ -742,12 +879,50 @@ private final class PictureTextView: UITextView {
     }
 }
 
+/// A picture shown in a field in place of its `<img>` tag, which it keeps
+/// to be written back as it was.
+private final class PictureAttachment: NSTextAttachment {
+    let tag: String
+
+    /// The largest a picture shows in the editor; the card shows it as it is.
+    static let maxSize = CGSize(width: 240, height: 180)
+
+    init(tag: String, image: UIImage) {
+        self.tag = tag
+        super.init(data: nil, ofType: nil)
+        self.image = image
+        let scale = min(1, Self.maxSize.width / max(image.size.width, 1), Self.maxSize.height / max(image.size.height, 1))
+        bounds = CGRect(
+            x: 0,
+            y: 0,
+            width: (image.size.width * scale).rounded(),
+            height: (image.size.height * scale).rounded()
+        )
+    }
+
+    required init?(coder: NSCoder) {
+        tag = ""
+        super.init(coder: coder)
+    }
+
+    /// `image` no bigger than it's shown, sharp on any screen.
+    static func shrunk(_ image: UIImage) -> UIImage {
+        let pixels = CGSize(width: image.size.width * image.scale, height: image.size.height * image.scale)
+        let largest = CGSize(width: maxSize.width * 3, height: maxSize.height * 3)
+        let factor = min(1, largest.width / max(pixels.width, 1), largest.height / max(pixels.height, 1))
+        guard factor < 1 else { return image }
+        let size = CGSize(width: (pixels.width * factor).rounded(), height: (pixels.height * factor).rounded())
+        return image.preparingThumbnail(of: size) ?? image
+    }
+}
+
 #else
 
 struct RichNoteFieldEditor: View {
     @Binding var htmlText: String
     var preservesSourceHTML = false
     var clozeTools = false
+    var focusOnAppear = false
 
     var body: some View {
         TextEditor(text: $htmlText)

@@ -31,6 +31,11 @@ final class AddNoteModel {
     /// The fields the chosen note type's cloze deletions go in; empty
     /// unless it's a cloze type.
     var clozeFieldNames: [String] = []
+    /// The chosen note type's pinned fields, by name: they keep what's in
+    /// them for the next note. See `togglePin`.
+    var pinnedFieldNames: Set<String> = []
+    /// Notes added since the screen opened; it stays open for the next.
+    private(set) var addedCount = 0
     var tags: String = ""
     var isSaving = false
     var errorMessage: String?
@@ -68,6 +73,53 @@ final class AddNoteModel {
     /// editor's cloze buttons.
     func isClozeField(_ index: Int) -> Bool {
         index < fieldNames.count && clozeFieldNames.contains(fieldNames[index])
+    }
+
+    // MARK: - Pinned fields
+
+    func isPinned(_ index: Int) -> Bool {
+        index < fieldNames.count && pinnedFieldNames.contains(fieldNames[index])
+    }
+
+    /// Pins the field at `index`, or unpins it. Remembered for the note
+    /// type, on this phone.
+    func togglePin(_ index: Int) {
+        guard index < fieldNames.count else { return }
+        let name = fieldNames[index]
+        if pinnedFieldNames.contains(name) {
+            pinnedFieldNames.remove(name)
+        } else {
+            pinnedFieldNames.insert(name)
+        }
+        UserDefaults.standard.set(pinnedFieldNames.sorted(), forKey: Self.pinnedFieldsKey(for: selectedNotetypeId))
+    }
+
+    /// The first field that starts empty for the next note.
+    var firstUnpinnedFieldIndex: Int? {
+        fieldNames.indices.first { !isPinned($0) }
+    }
+
+    /// Something to add: a field that isn't pinned has something in it (or
+    /// any field, when they're all pinned).
+    var hasNewContent: Bool {
+        let unpinned = fieldValues.indices.filter { !isPinned($0) }
+        let considered = unpinned.isEmpty ? Array(fieldValues.indices) : unpinned
+        return considered.contains { !fieldValues[$0].isEmpty }
+    }
+
+    /// Ready for the next note once one is added: pinned fields keep what's
+    /// in them, the rest start empty; the deck, note type and tags stay, as
+    /// in Anki's Add window.
+    func startNextNote() {
+        fieldValues = fieldValues.indices.map { isPinned($0) ? fieldValues[$0] : "" }
+        baselineFieldValues = fieldValues
+        baselineTags = tags
+        errorMessage = nil
+        addedCount += 1
+    }
+
+    private static func pinnedFieldsKey(for notetype: NotetypeID) -> String {
+        "add_note_pinned_fields_\(notetype.rawValue)"
     }
 
     func loadData() async {
@@ -124,6 +176,9 @@ final class AddNoteModel {
             let notetype = try await backendOffload { try service.getNotetype(id) }
             fieldNames = notetype.fieldNames
             clozeFieldNames = notetype.clozeFieldNames
+            // Pinned here before, or else as in Anki's Add window.
+            let pinned = UserDefaults.standard.stringArray(forKey: Self.pinnedFieldsKey(for: id))
+            pinnedFieldNames = Set(pinned ?? notetype.stickyFieldNames)
             // Pre-fill from the incoming draft by mapping
             // `fieldValues[name] → fieldValues[positionalIndex]` against the
             // notetype's actual field-name list. Names not present on this

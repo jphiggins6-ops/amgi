@@ -274,7 +274,7 @@ private final class Recorder<Value: Sendable>: @unchecked Sendable {
         let text = "{{c1::Na::ion}} and {{c2::K}}"
         let cloze = try #require(ClozeEditing.cloze(at: NSRange(location: 8, length: 0), in: text))
         #expect(cloze.hintRange == NSRange(location: 10, length: 3))
-        #expect(applied(ClozeEditing.removing(cloze, in: text), to: text) == "Na and {{c2::K}}")
+        #expect(ClozeEditing.removing(cloze).applied(to: text) == "Na and {{c2::K}}")
     }
 
     @Test func hintMakesRoomForOneOrSelectsIt() throws {
@@ -289,8 +289,9 @@ private final class Recorder<Value: Sendable>: @unchecked Sendable {
     }
 
     @Test func renumberPutsThemInOrderWithoutGaps() {
-        let edit = ClozeEditing.renumberedInOrder("{{c3::a}} {{c1::b}} {{c3::c}}", keeping: NSRange(location: 28, length: 0))
-        #expect(edit?.replacement == "{{c1::a}} {{c2::b}} {{c1::c}}")
+        let text = "{{c3::a}} {{c1::b}} {{c3::c}}"
+        let edit = ClozeEditing.renumberedInOrder(text, keeping: NSRange(location: 28, length: 0))
+        #expect(edit?.applied(to: text) == "{{c1::a}} {{c2::b}} {{c1::c}}")
         #expect(ClozeEditing.renumberedInOrder("{{c1::a}} {{c2::b}}", keeping: NSRange(location: 0, length: 0)) == nil, "already in order")
     }
 
@@ -310,7 +311,74 @@ private final class Recorder<Value: Sendable>: @unchecked Sendable {
         #expect(NotetypeInfo.clozeFieldNames(in: ["{{ cloze : Back Extra }}"], fieldNames: fields) == ["Back Extra"])
     }
 
+    @Test func wrappingLeavesTheWordsBetweenAsTheyAre() {
+        let edit = ClozeEditing.wrapping(NSRange(location: 4, length: 3), in: "abc def", number: 1)
+        #expect(edit.changes.allSatisfy { $0.range.length == 0 }, "only braces added: a picture in the selection stays")
+        #expect(edit.applied(to: "abc def") == "abc {{c1::def}}")
+    }
+
+    @Test func unwrapTakesAwayOnlyTheBracesAndHint() throws {
+        let text = "{{c1::a \u{FFFC} b::hint}}"
+        let cloze = try #require(ClozeEditing.cloze(at: NSRange(location: 7, length: 0), in: text))
+        let edit = ClozeEditing.removing(cloze)
+        #expect(edit.applied(to: text) == "a \u{FFFC} b", "a picture in the answer stays")
+        #expect(edit.selection == NSRange(location: 5, length: 0))
+    }
+
     private func applied(_ edit: ClozeEditing.Edit, to text: String) -> String {
-        (text as NSString).replacingCharacters(in: edit.range, with: edit.replacement)
+        edit.applied(to: text)
+    }
+}
+
+// MARK: - Pictures
+
+@Suite struct FieldPicturesTests {
+    @Test func aPicturesTagNamesItsFile() {
+        let text = #"Before <img src="paste-1.jpg"> after"#
+        let tags = FieldPictures.tags(in: text)
+        #expect(tags.map(\.filename) == ["paste-1.jpg"])
+        #expect(tags.first?.tag == #"<img src="paste-1.jpg">"#)
+        #expect(tags.first?.range == NSRange(location: 7, length: 23))
+    }
+
+    @Test func tagsAreReadHoweverTheyreWritten() {
+        let text = #"<IMG alt="x" SRC='a b.png' /> <img src=plain.gif> <img class="big" src="Tom &amp; Jerry.jpg">"#
+        #expect(FieldPictures.tags(in: text).map(\.filename) == ["a b.png", "plain.gif", "Tom & Jerry.jpg"])
+    }
+
+    @Test func picturesFromTheWebAreLeftAlone() {
+        let text = #"<img src="https://example.com/a.png"> <img src="data:image/png;base64,AAAA"> <img alt="none">"#
+        #expect(FieldPictures.tags(in: text).isEmpty)
+    }
+}
+
+// MARK: - The next note
+
+@MainActor
+@Suite struct AddNoteNextNoteTests {
+    @Test func pinnedFieldsKeepWhatsInThemForTheNextNote() {
+        let model = AddNoteModel()
+        model.fieldNames = ["Text", "Back Extra"]
+        model.fieldValues = ["{{c1::Ptosis}} in MG", "Robbins ch. 27"]
+        model.tags = "neuro"
+        model.pinnedFieldNames = ["Back Extra"]
+
+        model.startNextNote()
+
+        #expect(model.fieldValues == ["", "Robbins ch. 27"])
+        #expect(model.tags == "neuro", "tags stay, as in Anki")
+        #expect(model.addedCount == 1)
+        #expect(!model.hasUnsavedChanges, "closing now loses nothing")
+        #expect(model.firstUnpinnedFieldIndex == 0)
+    }
+
+    @Test func onlyAFieldThatIsntPinnedMakesANewNote() {
+        let model = AddNoteModel()
+        model.fieldNames = ["Text", "Back Extra"]
+        model.fieldValues = ["", "Robbins ch. 27"]
+        model.pinnedFieldNames = ["Back Extra"]
+        #expect(!model.hasNewContent)
+        model.fieldValues[0] = "{{c1::Diplopia}}"
+        #expect(model.hasNewContent)
     }
 }

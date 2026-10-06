@@ -16,19 +16,24 @@ public struct NotetypeInfo: Sendable {
     /// The fields cloze deletions go in: those its template reads with the
     /// `cloze` filter, `{{cloze:Text}}`. Empty unless `isCloze`.
     public let clozeFieldNames: [String]
+    /// The fields pinned in Anki's Add window ("sticky"), which keep what's
+    /// in them from one new note to the next.
+    public let stickyFieldNames: [String]
 
     package init(
         id: NotetypeID,
         name: String,
         fieldNames: [String],
         isCloze: Bool = false,
-        clozeFieldNames: [String] = []
+        clozeFieldNames: [String] = [],
+        stickyFieldNames: [String] = []
     ) {
         self.id = id
         self.name = name
         self.fieldNames = fieldNames
         self.isCloze = isCloze
         self.clozeFieldNames = clozeFieldNames
+        self.stickyFieldNames = stickyFieldNames
     }
 
     /// The fields `templates` read with the `cloze` filter, on its own or

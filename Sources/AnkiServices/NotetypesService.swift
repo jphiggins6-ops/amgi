@@ -43,7 +43,8 @@ extension NotetypesService: DependencyKey {
                     isCloze: isCloze,
                     // A template that hides its cloze field from the
                     // parser: the first field, where Anki's own puts it.
-                    clozeFieldNames: isCloze ? (clozeFields.isEmpty ? Array(fieldNames.prefix(1)) : clozeFields) : []
+                    clozeFieldNames: isCloze ? (clozeFields.isEmpty ? Array(fieldNames.prefix(1)) : clozeFields) : [],
+                    stickyFieldNames: notetype.fields.filter(\.config.sticky).map(\.name)
                 )
             },
             getNotetypeFields: { id in

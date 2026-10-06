@@ -12,10 +12,17 @@ import Theme
 /// Add Note container: owns the modal chrome (navigation, toolbar, dismissal)
 /// and drives an `AddNoteModel` for deck/notetype loading and the note write.
 /// The form itself is `AddNoteContent`, bound to the model.
+///
+/// Like Anki's Add window it stays open after each note: an "Added" toast,
+/// the fields not pinned start empty, and the cursor goes to the first of
+/// them. `onSave` is told of each note; a caller adding just one closes the
+/// sheet from there.
 package struct AddNoteView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var model: AddNoteModel
     @State private var showDiscardConfirm = false
+    @State private var showAddedConfirmation = false
+    @State private var addedToastTask: Task<Void, Never>?
     let onSave: () -> Void
 
     package init(
@@ -46,7 +53,7 @@ package struct AddNoteView: View {
                 }
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") {
+                        Button(model.addedCount > 0 ? "Done" : "Cancel") {
                             if model.hasUnsavedChanges {
                                 showDiscardConfirm = true
                             } else {
@@ -59,14 +66,47 @@ package struct AddNoteView: View {
                             Task {
                                 if await model.save() {
                                     onSave()
-                                    dismiss()
+                                    model.startNextNote()
+                                    showAdded()
                                 }
                             }
                         }
-                        .disabled(model.isSaving || model.fieldValues.allSatisfy(\.isEmpty))
+                        .disabled(model.isSaving || !model.hasNewContent)
                     }
                 }
+                .overlay { addedToast }
+                .sensoryFeedback(.success, trigger: model.addedCount)
                 .task { await model.loadData() }
+        }
+    }
+}
+
+// MARK: - Added
+
+private extension AddNoteView {
+    func showAdded() {
+        addedToastTask?.cancel()
+        addedToastTask = Task {
+            withAnimation(AmgiMotion.momentum) { showAddedConfirmation = true }
+            try? await Task.sleep(for: .seconds(1.2))
+            withAnimation(AmgiMotion.standard) { showAddedConfirmation = false }
+        }
+    }
+
+    @ViewBuilder
+    var addedToast: some View {
+        if showAddedConfirmation {
+            VStack {
+                Spacer()
+                Text(verbatim: model.addedCount > 1 ? "Added · \(model.addedCount) so far" : "Added")
+                    .amgiFont(.bodyEmphasis)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .amgiMaterial(.light, in: Capsule())
+                    .padding(.bottom, 32)
+            }
+            .allowsHitTesting(false)
+            .transition(AmgiMotion.slide(from: .bottom))
         }
     }
 }
@@ -101,18 +141,35 @@ struct AddNoteContent: View {
                 }
             }
 
-            Section("Fields") {
+            Section {
                 ForEach(Array(model.fieldNames.enumerated()), id: \.element) { index, name in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(name)
-                            .amgiFont(.caption)
-                            .foregroundStyle(palette.textSecondary)
-                        RichNoteFieldEditor(htmlText: $model[fieldAt: index], clozeTools: model.isClozeField(index))
+                        HStack {
+                            Text(name)
+                                .amgiFont(.caption)
+                                .foregroundStyle(palette.textSecondary)
+                            Spacer(minLength: 0)
+                            PinFieldButton(fieldName: name, isPinned: model.isPinned(index)) {
+                                model.togglePin(index)
+                            }
+                        }
+                        RichNoteFieldEditor(
+                            htmlText: $model[fieldAt: index],
+                            clozeTools: model.isClozeField(index),
+                            focusOnAppear: model.addedCount > 0 && index == model.firstUnpinnedFieldIndex
+                        )
+                        // Made again for each new note: an editor being
+                        // typed in doesn't take outside changes.
+                        .id(model.addedCount)
                         if model.isClozeField(index) {
                             ClozeFieldSummary(html: model[fieldAt: index])
                         }
                     }
                 }
+            } header: {
+                Text("Fields")
+            } footer: {
+                Text("A pinned field keeps what's in it for the next note: a source, a picture, or a sentence you're making several cards from.")
             }
 
             Section("Tags") {
@@ -129,6 +186,36 @@ struct AddNoteContent: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Pinning
+
+/// The pin by a field's name: a pinned field keeps what's in it from one
+/// new note to the next.
+private struct PinFieldButton: View {
+    let fieldName: String
+    let isPinned: Bool
+    let toggle: () -> Void
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Button(action: toggle) {
+            Image(systemName: isPinned ? "pin.fill" : "pin")
+                .imageScale(.small)
+                .foregroundStyle(isPinned ? palette.accent : palette.textTertiary)
+                .frame(minWidth: 32, minHeight: 24)
+                .contentShape(Rectangle())
+        }
+        // Only the pin takes the tap, not the whole row.
+        .buttonStyle(.borderless)
+        .accessibilityLabel(accessibilityTitle)
+        .accessibilityHint("A pinned field keeps what's in it for the next note")
+    }
+
+    private var accessibilityTitle: String {
+        isPinned ? "Unpin \(fieldName)" : "Pin \(fieldName)"
     }
 }
 

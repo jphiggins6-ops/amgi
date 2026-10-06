@@ -121,12 +121,28 @@ enum ClozeEditing {
         let hintRange: NSRange?
     }
 
-    /// A change to the field: `replacement` in place of `range`, then the
-    /// cursor or selection at `selection`.
+    /// A change to the field: each of `changes` in place of its range in
+    /// the text as it was (they don't overlap), then the cursor or
+    /// selection at `selection` in the text as it becomes. What's already
+    /// there is never typed again, so a picture shown among it stays.
     struct Edit: Equatable {
-        let range: NSRange
-        let replacement: String
+        struct Change: Equatable {
+            let range: NSRange
+            let replacement: String
+        }
+
+        let changes: [Change]
         let selection: NSRange
+
+        /// `text` with the changes made, the last first so the earlier
+        /// offsets still hold.
+        func applied(to text: String) -> String {
+            let result = NSMutableString(string: text)
+            for change in changes.sorted(by: { $0.range.location > $1.range.location }) {
+                result.replaceCharacters(in: change.range, with: change.replacement)
+            }
+            return result as String
+        }
     }
 
     /// Every deletion, nested ones too, in the order they start.
@@ -201,15 +217,20 @@ enum ClozeEditing {
         while start < end, isSpace(source.character(at: start)) { start += 1 }
         while end > start, isSpace(source.character(at: end - 1)) { end -= 1 }
         let opening = "{{c\(number)::"
-        let answer = source.substring(with: NSRange(location: start, length: end - start))
-        let replacement = opening + answer + "}}"
-        let caret = answer.isEmpty
-            ? start + (opening as NSString).length
-            : start + (replacement as NSString).length
+        let openingLength = (opening as NSString).length
+        guard end > start else {
+            return Edit(
+                changes: [Edit.Change(range: NSRange(location: start, length: 0), replacement: opening + "}}")],
+                selection: NSRange(location: start + openingLength, length: 0)
+            )
+        }
+        // The braces go either side; what's between stays as it is.
         return Edit(
-            range: NSRange(location: start, length: end - start),
-            replacement: replacement,
-            selection: NSRange(location: caret, length: 0)
+            changes: [
+                Edit.Change(range: NSRange(location: end, length: 0), replacement: "}}"),
+                Edit.Change(range: NSRange(location: start, length: 0), replacement: opening),
+            ],
+            selection: NSRange(location: end + openingLength + 2, length: 0)
         )
     }
 
@@ -220,17 +241,22 @@ enum ClozeEditing {
         if selection.location >= NSMaxRange(cloze.numberRange) {
             moved.location += (digits as NSString).length - cloze.numberRange.length
         }
-        return Edit(range: cloze.numberRange, replacement: digits, selection: moved)
+        return Edit(changes: [Edit.Change(range: cloze.numberRange, replacement: digits)], selection: moved)
     }
 
     /// `cloze` taken away, its answer kept as ordinary text and any hint
     /// dropped; the cursor after the answer.
-    static func removing(_ cloze: Cloze, in text: String) -> Edit {
-        let answer = (text as NSString).substring(with: cloze.answerRange)
+    static func removing(_ cloze: Cloze) -> Edit {
+        let answerEnd = NSMaxRange(cloze.answerRange)
         return Edit(
-            range: cloze.range,
-            replacement: answer,
-            selection: NSRange(location: cloze.range.location + (answer as NSString).length, length: 0)
+            changes: [
+                Edit.Change(range: NSRange(location: answerEnd, length: NSMaxRange(cloze.range) - answerEnd), replacement: ""),
+                Edit.Change(
+                    range: NSRange(location: cloze.range.location, length: cloze.answerRange.location - cloze.range.location),
+                    replacement: ""
+                ),
+            ],
+            selection: NSRange(location: cloze.range.location + cloze.answerRange.length, length: 0)
         )
     }
 
@@ -239,12 +265,11 @@ enum ClozeEditing {
     /// the closing braces with the cursor after it.
     static func hint(for cloze: Cloze) -> Edit {
         if let hintRange = cloze.hintRange {
-            return Edit(range: NSRange(location: hintRange.location, length: 0), replacement: "", selection: hintRange)
+            return Edit(changes: [], selection: hintRange)
         }
         let closing = NSMaxRange(cloze.range) - 2
         return Edit(
-            range: NSRange(location: closing, length: 0),
-            replacement: "::",
+            changes: [Edit.Change(range: NSRange(location: closing, length: 0), replacement: "::")],
             selection: NSRange(location: closing + 2, length: 0)
         )
     }
@@ -259,21 +284,17 @@ enum ClozeEditing {
             mapping[cloze.number] = mapping.count + 1
         }
         guard mapping.contains(where: { $0.key != $0.value }) else { return nil }
-        let renumbered = NSMutableString(string: text)
+        var changes: [Edit.Change] = []
         var moved = selection
-        // From the end, so the offsets before each one still hold.
-        for cloze in all.sorted(by: { $0.numberRange.location > $1.numberRange.location }) {
+        for cloze in all {
             let digits = String(mapping[cloze.number] ?? cloze.number)
-            renumbered.replaceCharacters(in: cloze.numberRange, with: digits)
-            if moved.location >= NSMaxRange(cloze.numberRange) {
+            guard digits != String(cloze.number) else { continue }
+            changes.append(Edit.Change(range: cloze.numberRange, replacement: digits))
+            if selection.location >= NSMaxRange(cloze.numberRange) {
                 moved.location += (digits as NSString).length - cloze.numberRange.length
             }
         }
-        return Edit(
-            range: NSRange(location: 0, length: (text as NSString).length),
-            replacement: renumbered as String,
-            selection: moved
-        )
+        return Edit(changes: changes, selection: moved)
     }
 
     // MARK: Reading the braces
@@ -302,3 +323,55 @@ enum ClozeEditing {
         character == 0x20 || character == 0x0A || character == 0x09 || character == 0xA0
     }
 }
+
+// MARK: - Pictures
+
+/// Pictures in a field's HTML: its `<img>` tags and the media files they
+/// show, so the editor can show the pictures themselves.
+enum FieldPictures {
+    struct Tag: Equatable {
+        /// Where the tag is, in the text it was found in.
+        let range: NSRange
+        /// The tag as written, `<img src="paste-….jpg">`.
+        let tag: String
+        /// The media file it shows, as named in the tag.
+        let filename: String
+    }
+
+    /// Each `<img>` tag showing a file from the media folder; one showing a
+    /// web address or inline data is left as it is.
+    static func tags(in text: String) -> [Tag] {
+        let source = text as NSString
+        return imageTag.matches(in: text, range: NSRange(location: 0, length: source.length)).compactMap { match in
+            let tag = source.substring(with: match.range)
+            let tagSource = tag as NSString
+            guard let src = sourceAttribute.firstMatch(in: tag, range: NSRange(location: 0, length: tagSource.length)) else {
+                return nil
+            }
+            let value = (1...3).lazy
+                .map { src.range(at: $0) }
+                .first { $0.location != NSNotFound }
+                .map { tagSource.substring(with: $0) }
+            guard let value, !value.isEmpty, !value.contains("://"), !value.lowercased().hasPrefix("data:") else {
+                return nil
+            }
+            return Tag(range: match.range, tag: tag, filename: decodedAttribute(value))
+        }
+    }
+
+    private static let imageTag = try! NSRegularExpression(pattern: #"<img\b[^>]*>"#, options: [.caseInsensitive])
+    private static let sourceAttribute = try! NSRegularExpression(
+        pattern: #"\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))"#,
+        options: [.caseInsensitive]
+    )
+
+    private static func decodedAttribute(_ value: String) -> String {
+        var result = value
+        // &amp; last, or "&amp;lt;" would decode twice.
+        for (entity, character) in [("&quot;", "\""), ("&#39;", "'"), ("&lt;", "<"), ("&gt;", ">"), ("&amp;", "&")] {
+            result = result.replacingOccurrences(of: entity, with: character)
+        }
+        return result
+    }
+}
+
