@@ -106,6 +106,12 @@ struct RichNoteFieldEditor: UIViewRepresentable {
         return textView
     }
 
+    /// Gone from the screen, as when the next note's fields are made: it
+    /// mustn't write the text it showed back over theirs on its way out.
+    static func dismantleUIView(_ uiView: UITextView, coordinator: Coordinator) {
+        uiView.delegate = nil
+    }
+
     /// As tall as the whole field, so the form scrolls through it. Capping
     /// the height (it was 160 pt) cut long fields off: scrolling inside the
     /// text view is off, so the rest of the field was unreachable.

@@ -8,6 +8,9 @@
 package import SwiftUI
 package import AnkiKit
 import Theme
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Add Note container: owns the modal chrome (navigation, toolbar, dismissal)
 /// and drives an `AddNoteModel` for deck/notetype loading and the note write.
@@ -82,6 +85,18 @@ package struct AddNoteView: View {
                     }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Add") {
+                            // Finish the typing first: it puts in a word
+                            // still being composed, and a field being typed
+                            // in would write its text back over the next
+                            // note's as it went.
+                            #if canImport(UIKit)
+                            UIApplication.shared.sendAction(
+                                #selector(UIResponder.resignFirstResponder),
+                                to: nil,
+                                from: nil,
+                                for: nil
+                            )
+                            #endif
                             Task {
                                 if await model.save() {
                                     onSave()
