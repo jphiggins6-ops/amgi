@@ -23,6 +23,9 @@ import SwiftUI
 final class NoteEditorModel {
     var fieldNames: [String] = []
     var fieldValues: [String] = []
+    /// The fields the note type's cloze deletions go in; empty unless it's
+    /// a cloze type.
+    var clozeFieldNames: [String] = []
     var tags: String = ""
     var isSaving = false
     /// Bumped by each paste. The field editors are rebuilt from it, so they
@@ -49,12 +52,19 @@ final class NoteEditorModel {
         set { if index < fieldValues.count { fieldValues[index] = newValue } }
     }
 
+    /// Whether the field at `index` takes cloze deletions, and so the
+    /// editor's cloze buttons.
+    func isClozeField(_ index: Int) -> Bool {
+        index < fieldNames.count && clozeFieldNames.contains(fieldNames[index])
+    }
+
     func loadNote() async {
         do {
             let service = notetypesService
             let mid = note.mid
             let notetype = try await backendOffload { try service.getNotetype(mid) }
             fieldNames = notetype.fieldNames
+            clozeFieldNames = notetype.clozeFieldNames
         } catch {
             Log.browse.error("Error loading notetype: \(error)")
         }

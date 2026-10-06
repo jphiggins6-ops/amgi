@@ -21,9 +21,16 @@ import UniformTypeIdentifiers
 /// A picture pasted into the field (Paste in the menu, or ⌘V) is stored as
 /// media and its tag put where the cursor is; a field edited as plain text
 /// is edited as HTML from then on, to hold it.
+///
+/// With `clozeTools`, for the field a cloze note's deletions go in, the bar
+/// above the keyboard starts with them: Cloze hides the selection on a card
+/// of its own, Same Card on the card of the last one, the c1/c2 button
+/// moves the deletion the cursor is in to another card, Hint gives it a
+/// hint, Unwrap takes it away, and Renumber numbers them all in order.
 struct RichNoteFieldEditor: UIViewRepresentable {
     @Binding var htmlText: String
     var preservesSourceHTML = false
+    var clozeTools = false
 
     static func normalizedStoredHTML(_ text: String) -> String {
         Coordinator.normalizedStoredHTML(from: text)
@@ -44,7 +51,11 @@ struct RichNoteFieldEditor: UIViewRepresentable {
     /// The editing mode is settled once, from the field as it opens, so it
     /// can't flip in the middle of typing.
     func makeCoordinator() -> Coordinator {
-        Coordinator(htmlText: $htmlText, editsSource: preservesSourceHTML || Self.editsAsSource(htmlText))
+        Coordinator(
+            htmlText: $htmlText,
+            editsSource: preservesSourceHTML || Self.editsAsSource(htmlText),
+            clozeTools: clozeTools
+        )
     }
 
     func makeUIView(context: Context) -> UITextView {
@@ -60,6 +71,7 @@ struct RichNoteFieldEditor: UIViewRepresentable {
             guard let coordinator else { return }
             textView.inputAccessoryView = makeInputToolbar(for: textView, coordinator: coordinator)
             textView.reloadInputViews()
+            coordinator.refreshClozeTools()
         }
         textView.isEditable = true
         textView.isSelectable = true
@@ -76,6 +88,7 @@ struct RichNoteFieldEditor: UIViewRepresentable {
         textView.text = displayText(for: htmlText, editsSource: context.coordinator.editsSource)
         context.coordinator.lastRenderedValue = htmlText
         context.coordinator.lastPlainText = textView.text ?? ""
+        context.coordinator.refreshClozeTools()
         return textView
     }
 
@@ -89,6 +102,10 @@ struct RichNoteFieldEditor: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
+        if context.coordinator.clozeTools != clozeTools {
+            context.coordinator.clozeTools = clozeTools
+            context.coordinator.rebuildToolbar?(uiView)
+        }
         guard !context.coordinator.isEditing else { return }
         guard htmlText != context.coordinator.lastRenderedValue else { return }
 
@@ -113,13 +130,20 @@ struct RichNoteFieldEditor: UIViewRepresentable {
         weak var textView: UITextView?
         var rebuildToolbar: ((UITextView) -> Void)?
         @Dependency(\.mediaClient) private var mediaClient
+        /// The cloze buttons, for the field cloze deletions go in.
+        var clozeTools: Bool
+        weak var clozeNumberButton: UIButton?
+        weak var clozeHintButton: UIButton?
+        weak var clozeUnwrapButton: UIButton?
+        weak var clozeRenumberButton: UIButton?
         var lastRenderedValue: String = ""
         var lastPlainText: String = ""
         var isEditing = false
 
-        init(htmlText: Binding<String>, editsSource: Bool) {
+        init(htmlText: Binding<String>, editsSource: Bool, clozeTools: Bool) {
             self._htmlText = htmlText
             self.editsSource = editsSource
+            self.clozeTools = clozeTools
         }
 
         func attach(textView: UITextView) {
@@ -138,6 +162,10 @@ struct RichNoteFieldEditor: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             commit(textView.text ?? "")
             Self.keepCaretVisible(in: textView)
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            refreshClozeTools()
         }
 
         /// The field grows as it's typed into; once it has, scroll the form
@@ -184,6 +212,97 @@ struct RichNoteFieldEditor: UIViewRepresentable {
                 insertMarkup(tags.joined(separator: "<br>"))
                 feedback.notificationOccurred(.success)
             }
+        }
+
+        // MARK: Cloze deletions
+
+        /// The selection made a cloze deletion: on a card of its own (the
+        /// next number), or with `sameCard` on the card of the highest
+        /// number used, hidden together with what's there.
+        func newCloze(sameCard: Bool) {
+            guard let textView else { return }
+            let text = textView.text ?? ""
+            let number = sameCard ? ClozeEditing.highestNumber(in: text) : ClozeEditing.nextNumber(in: text)
+            apply(ClozeEditing.wrapping(textView.selectedRange, in: text, number: number))
+        }
+
+        /// The deletion the cursor is in, moved to card `number`.
+        func setClozeNumber(_ number: Int) {
+            guard let textView, let cloze = currentCloze else { return }
+            apply(ClozeEditing.renumbering(cloze, to: number, keeping: textView.selectedRange))
+        }
+
+        func editClozeHint() {
+            guard let cloze = currentCloze else { return }
+            apply(ClozeEditing.hint(for: cloze))
+        }
+
+        func removeCloze() {
+            guard let textView, let cloze = currentCloze else { return }
+            apply(ClozeEditing.removing(cloze, in: textView.text ?? ""))
+        }
+
+        func renumberClozes() {
+            guard let textView,
+                  let edit = ClozeEditing.renumberedInOrder(textView.text ?? "", keeping: textView.selectedRange)
+            else { return }
+            apply(edit)
+        }
+
+        /// The cloze buttons for where the cursor is: the number of the
+        /// deletion it's in, with a menu to move it to another card; Hint
+        /// and Unwrap only in one; Renumber only when the numbers are out
+        /// of order.
+        func refreshClozeTools() {
+            guard clozeTools, let textView else { return }
+            let text = textView.text ?? ""
+            let current = ClozeEditing.cloze(at: textView.selectedRange, in: text)
+            clozeHintButton?.isEnabled = current != nil
+            clozeUnwrapButton?.isEnabled = current != nil
+            clozeRenumberButton?.isEnabled = ClozeEditing.renumberedInOrder(text, keeping: textView.selectedRange) != nil
+            guard let button = clozeNumberButton else { return }
+            var configuration = button.configuration ?? .gray()
+            if let current {
+                let highest = ClozeEditing.highestNumber(in: text)
+                configuration.title = "c\(current.number)"
+                button.menu = UIMenu(title: "Which card hides it", children: (1...(highest + 1)).map { number in
+                    UIAction(
+                        title: number > highest ? "c\(number), a new card" : "c\(number)",
+                        state: number == current.number ? .on : .off
+                    ) { [weak self] _ in
+                        self?.setClozeNumber(number)
+                    }
+                })
+                button.isEnabled = true
+                button.accessibilityLabel = "Card \(current.number). Choose another card for this cloze deletion"
+            } else {
+                configuration.title = "c#"
+                button.menu = nil
+                button.isEnabled = false
+                button.accessibilityLabel = "Card number: put the cursor in a cloze deletion to change it"
+            }
+            button.configuration = configuration
+        }
+
+        private var currentCloze: ClozeEditing.Cloze? {
+            guard let textView else { return nil }
+            return ClozeEditing.cloze(at: textView.selectedRange, in: textView.text ?? "")
+        }
+
+        /// A cloze button's change, made through the text view so Undo
+        /// takes it back.
+        private func apply(_ edit: ClozeEditing.Edit) {
+            guard let textView else { return }
+            if edit.range.length > 0 || !edit.replacement.isEmpty,
+               let start = textView.position(from: textView.beginningOfDocument, offset: edit.range.location),
+               let end = textView.position(from: start, offset: edit.range.length),
+               let range = textView.textRange(from: start, to: end) {
+                textView.replace(range, withText: edit.replacement)
+            }
+            textView.selectedRange = edit.selection
+            commit(textView.text ?? "")
+            refreshClozeTools()
+            Self.keepCaretVisible(in: textView)
         }
 
         /// `markup` where the cursor is, in place of any selection. A field
@@ -329,6 +448,10 @@ private extension RichNoteFieldEditor {
         stackView.spacing = 6
         scrollView.addSubview(stackView)
 
+        if coordinator.clozeTools {
+            addClozeButtons(to: stackView, coordinator: coordinator)
+        }
+
         stackView.addArrangedSubview(
             makeSymbolButton(systemName: "arrow.uturn.backward", title: "Undo") {
                 textView.undoManager?.undo()
@@ -368,11 +491,11 @@ private extension RichNoteFieldEditor {
             )
         }
 
-        stackView.addArrangedSubview(
-            makeTextButton(title: doneButtonTitle) {
-                textView.resignFirstResponder()
-            }
-        )
+        // Outside the scrolling buttons, so it's always in reach.
+        let doneButton = makeTextButton(title: doneButtonTitle) {
+            textView.resignFirstResponder()
+        }
+        container.addSubview(doneButton)
 
         NSLayoutConstraint.activate([
             divider.topAnchor.constraint(equalTo: container.topAnchor),
@@ -380,8 +503,11 @@ private extension RichNoteFieldEditor {
             divider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             divider.heightAnchor.constraint(equalToConstant: 0.5),
 
+            doneButton.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -10),
+            doneButton.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: doneButton.leadingAnchor, constant: -6),
             scrollView.topAnchor.constraint(equalTo: divider.bottomAnchor),
             scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
 
@@ -393,6 +519,65 @@ private extension RichNoteFieldEditor {
         ])
 
         return container
+    }
+
+    /// Cloze, Same Card, the card number, Hint, Unwrap and Renumber.
+    func addClozeButtons(to stackView: UIStackView, coordinator: Coordinator) {
+        stackView.addArrangedSubview(makeClozeButton(
+            title: "Cloze",
+            label: "Cloze: hide the selection on a card of its own",
+            prominent: true
+        ) {
+            coordinator.newCloze(sameCard: false)
+        })
+        stackView.addArrangedSubview(makeClozeButton(
+            title: "Same Card",
+            label: "Cloze on the same card: hide the selection along with the last one"
+        ) {
+            coordinator.newCloze(sameCard: true)
+        })
+        let number = makeClozeButton(title: "c#", label: "Card number", action: nil)
+        number.showsMenuAsPrimaryAction = true
+        coordinator.clozeNumberButton = number
+        stackView.addArrangedSubview(number)
+        let hint = makeClozeButton(title: "Hint", label: "Give this cloze deletion a hint") {
+            coordinator.editClozeHint()
+        }
+        coordinator.clozeHintButton = hint
+        stackView.addArrangedSubview(hint)
+        let unwrap = makeClozeButton(title: "Unwrap", label: "Take away this cloze deletion, keeping its words") {
+            coordinator.removeCloze()
+        }
+        coordinator.clozeUnwrapButton = unwrap
+        stackView.addArrangedSubview(unwrap)
+        let renumber = makeClozeButton(title: "Renumber", label: "Number the cloze deletions in order, from c1") {
+            coordinator.renumberClozes()
+        }
+        coordinator.clozeRenumberButton = renumber
+        stackView.addArrangedSubview(renumber)
+
+        let separator = UIView()
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.backgroundColor = .separator
+        separator.widthAnchor.constraint(equalToConstant: 1).isActive = true
+        separator.heightAnchor.constraint(equalToConstant: 20).isActive = true
+        stackView.addArrangedSubview(separator)
+    }
+
+    func makeClozeButton(title: String, label: String, prominent: Bool = false, action: (() -> Void)?) -> UIButton {
+        var configuration: UIButton.Configuration = prominent ? .filled() : .gray()
+        configuration.title = title
+        configuration.buttonSize = .small
+        configuration.cornerStyle = .medium
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8)
+        let button = UIButton(configuration: configuration)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.accessibilityLabel = label
+        button.heightAnchor.constraint(equalToConstant: 28).isActive = true
+        if let action {
+            button.addAction(UIAction { _ in action() }, for: .touchUpInside)
+        }
+        return button
     }
 
     func makeSymbolButton(systemName: String, title: String, action: @escaping () -> Void) -> UIButton {
@@ -562,6 +747,7 @@ private final class PictureTextView: UITextView {
 struct RichNoteFieldEditor: View {
     @Binding var htmlText: String
     var preservesSourceHTML = false
+    var clozeTools = false
 
     var body: some View {
         TextEditor(text: $htmlText)

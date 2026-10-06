@@ -28,6 +28,9 @@ final class AddNoteModel {
     var selectedNotetypeId: NotetypeID = NotetypeID(0)
     var fieldNames: [String] = []
     var fieldValues: [String] = []
+    /// The fields the chosen note type's cloze deletions go in; empty
+    /// unless it's a cloze type.
+    var clozeFieldNames: [String] = []
     var tags: String = ""
     var isSaving = false
     var errorMessage: String?
@@ -61,6 +64,12 @@ final class AddNoteModel {
         set { if index < fieldValues.count { fieldValues[index] = newValue } }
     }
 
+    /// Whether the field at `index` takes cloze deletions, and so the
+    /// editor's cloze buttons.
+    func isClozeField(_ index: Int) -> Bool {
+        index < fieldNames.count && clozeFieldNames.contains(fieldNames[index])
+    }
+
     func loadData() async {
         decks = (try? await deckClient.fetchAll()) ?? []
         if let preselectedDeckId, decks.contains(where: { $0.id == preselectedDeckId }) {
@@ -73,10 +82,12 @@ final class AddNoteModel {
             let service = notetypesService
             notetypeNames = try await backendOffload { try service.getNotetypeNames() }
             // Honour an incoming draft's preferred notetype when it matches
-            // one the user actually has; otherwise fall back to the first.
-            let chosen = initialDraft?.notetypeID
+            // one the user actually has; otherwise Cloze, then the first.
+            var chosen = initialDraft?.notetypeID
                 .flatMap { id in notetypeNames.first(where: { $0.id.rawValue == id }) }
-                ?? notetypeNames.first
+            if chosen == nil {
+                chosen = await clozeNotetype() ?? notetypeNames.first
+            }
             if let chosen {
                 selectedNotetypeId = chosen.id
                 await loadFields()
@@ -91,6 +102,20 @@ final class AddNoteModel {
         baselineTags = tags
     }
 
+    /// The note type a new note starts as: Anki's own Cloze when it's
+    /// there, otherwise the first cloze type (never Image Occlusion).
+    private func clozeNotetype() async -> (id: NotetypeID, name: String)? {
+        let service = notetypesService
+        var clozeTypes: [(id: NotetypeID, name: String)] = []
+        for entry in notetypeNames {
+            let id = entry.id
+            if let info = try? await backendOffload({ try service.getNotetype(id) }), info.isCloze {
+                clozeTypes.append(entry)
+            }
+        }
+        return clozeTypes.first { $0.name == "Cloze" } ?? clozeTypes.first
+    }
+
     func loadFields() async {
         guard selectedNotetypeId.rawValue != 0 else { return }
         do {
@@ -98,6 +123,7 @@ final class AddNoteModel {
             let id = selectedNotetypeId
             let notetype = try await backendOffload { try service.getNotetype(id) }
             fieldNames = notetype.fieldNames
+            clozeFieldNames = notetype.clozeFieldNames
             // Pre-fill from the incoming draft by mapping
             // `fieldValues[name] → fieldValues[positionalIndex]` against the
             // notetype's actual field-name list. Names not present on this
@@ -115,6 +141,13 @@ final class AddNoteModel {
     /// `errorMessage` carries the reason. Navigation/dismissal stays with
     /// the View.
     func save() async -> Bool {
+        // A cloze note makes a card for each number in its deletions: with
+        // none, there'd be nothing to study.
+        if !clozeFieldNames.isEmpty,
+           !fieldValues.indices.contains(where: { isClozeField($0) && !ClozeEditing.numbers(in: fieldValues[$0]).isEmpty }) {
+            errorMessage = "Hide something first: select words in \(clozeFieldNames[0]) and tap Cloze above the keyboard."
+            return false
+        }
         isSaving = true
         errorMessage = nil
         defer { isSaving = false }

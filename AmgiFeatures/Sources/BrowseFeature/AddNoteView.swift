@@ -107,7 +107,10 @@ struct AddNoteContent: View {
                         Text(name)
                             .amgiFont(.caption)
                             .foregroundStyle(palette.textSecondary)
-                        RichNoteFieldEditor(htmlText: $model[fieldAt: index])
+                        RichNoteFieldEditor(htmlText: $model[fieldAt: index], clozeTools: model.isClozeField(index))
+                        if model.isClozeField(index) {
+                            ClozeFieldSummary(html: model[fieldAt: index])
+                        }
                     }
                 }
             }
@@ -126,6 +129,31 @@ struct AddNoteContent: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Cloze
+
+/// Under a field cloze deletions go in: the cards they make, or how to
+/// make the first.
+struct ClozeFieldSummary: View {
+    let html: String
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Text(verbatim: summary)
+            .amgiFont(.caption)
+            .foregroundStyle(palette.textSecondary)
+    }
+
+    private var summary: String {
+        let numbers = ClozeEditing.numbers(in: html)
+        guard !numbers.isEmpty else {
+            return "Select the words to hide, then tap Cloze above the keyboard. Each number (c1, c2…) is a card of its own; Same Card hides more on the same card."
+        }
+        let cards = numbers.map { "c\($0)" }.joined(separator: ", ")
+        return numbers.count == 1 ? "Makes 1 card: \(cards)" : "Makes \(numbers.count) cards: \(cards)"
     }
 }
 

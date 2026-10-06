@@ -29,10 +29,21 @@ extension NotetypesService: DependencyKey {
             },
             getNotetype: { id in
                 let notetype = try backend.invoke(.notetype(for: id))
+                let fieldNames = notetype.fields.map(\.name)
+                let isCloze = notetype.config.kind == .cloze
+                    && notetype.config.originalStockKind != .imageOcclusion
+                let clozeFields = NotetypeInfo.clozeFieldNames(
+                    in: notetype.templates.map(\.config.qFormat),
+                    fieldNames: fieldNames
+                )
                 return NotetypeInfo(
                     id: notetype.id,
                     name: notetype.name,
-                    fieldNames: notetype.fields.map(\.name)
+                    fieldNames: fieldNames,
+                    isCloze: isCloze,
+                    // A template that hides its cloze field from the
+                    // parser: the first field, where Anki's own puts it.
+                    clozeFieldNames: isCloze ? (clozeFields.isEmpty ? Array(fieldNames.prefix(1)) : clozeFields) : []
                 )
             },
             getNotetypeFields: { id in

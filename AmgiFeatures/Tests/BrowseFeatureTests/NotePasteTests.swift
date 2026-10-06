@@ -216,3 +216,101 @@ private final class Recorder<Value: Sendable>: @unchecked Sendable {
         return storage
     }
 }
+
+// MARK: - Cloze deletions
+
+@Suite struct ClozeEditingTests {
+    @Test func aSelectionBecomesTheNextCard() {
+        let text = "The capital of France is Paris"
+        let first = ClozeEditing.wrapping(NSRange(location: 25, length: 5), in: text, number: ClozeEditing.nextNumber(in: text))
+        let once = applied(first, to: text)
+        #expect(once == "The capital of France is {{c1::Paris}}")
+        #expect(first.selection == NSRange(location: 38, length: 0), "the cursor after it")
+        let second = ClozeEditing.wrapping(NSRange(location: 15, length: 6), in: once, number: ClozeEditing.nextNumber(in: once))
+        #expect(applied(second, to: once) == "The capital of {{c2::France}} is {{c1::Paris}}")
+    }
+
+    @Test func sameCardUsesTheHighestNumber() {
+        let text = "{{c1::a}} {{c2::b}} c"
+        #expect(ClozeEditing.highestNumber(in: text) == 2)
+        #expect(ClozeEditing.nextNumber(in: text) == 3)
+        #expect(ClozeEditing.highestNumber(in: "none yet") == 1)
+        #expect(ClozeEditing.nextNumber(in: "none yet") == 1)
+    }
+
+    @Test func spacesAtTheEndsOfASelectionStayOutside() {
+        let edit = ClozeEditing.wrapping(NSRange(location: 3, length: 5), in: "abc def gh", number: 2)
+        #expect(applied(edit, to: "abc def gh") == "abc {{c2::def}} gh")
+    }
+
+    @Test func nothingSelectedMakesAnEmptyOneToTypeInto() {
+        let edit = ClozeEditing.wrapping(NSRange(location: 3, length: 0), in: "abc def", number: 1)
+        #expect(applied(edit, to: "abc def") == "abc{{c1::}} def")
+        #expect(edit.selection == NSRange(location: 9, length: 0), "the cursor inside")
+    }
+
+    @Test func theDeletionTheCursorIsInMovesToAnotherCard() throws {
+        let text = "The capital of {{c2::France}} is {{c1::Paris}}"
+        let caret = NSRange(location: 29, length: 0)
+        let cloze = try #require(ClozeEditing.cloze(at: caret, in: text), "just after its braces counts")
+        #expect(cloze.number == 2)
+        let edit = ClozeEditing.renumbering(cloze, to: 3, keeping: caret)
+        #expect(applied(edit, to: text) == "The capital of {{c3::France}} is {{c1::Paris}}")
+        #expect(edit.selection == caret)
+    }
+
+    @Test func theCursorJustBeforeADeletionIsntInIt() {
+        #expect(ClozeEditing.cloze(at: NSRange(location: 0, length: 0), in: "{{c1::x}}") == nil)
+        #expect(ClozeEditing.cloze(at: NSRange(location: 9, length: 0), in: "{{c1::x}}")?.number == 1)
+    }
+
+    @Test func theInnermostDeletionIsTheOneChanged() {
+        let text = "{{c1::outer {{c2::inner}} end}}"
+        #expect(ClozeEditing.cloze(at: NSRange(location: 20, length: 0), in: text)?.number == 2)
+        #expect(ClozeEditing.cloze(at: NSRange(location: 8, length: 0), in: text)?.number == 1)
+    }
+
+    @Test func unwrapKeepsTheWordsAndDropsTheHint() throws {
+        let text = "{{c1::Na::ion}} and {{c2::K}}"
+        let cloze = try #require(ClozeEditing.cloze(at: NSRange(location: 8, length: 0), in: text))
+        #expect(cloze.hintRange == NSRange(location: 10, length: 3))
+        #expect(applied(ClozeEditing.removing(cloze, in: text), to: text) == "Na and {{c2::K}}")
+    }
+
+    @Test func hintMakesRoomForOneOrSelectsIt() throws {
+        let text = "{{c1::Paris}}"
+        let cloze = try #require(ClozeEditing.cloze(at: NSRange(location: 13, length: 0), in: text))
+        let edit = ClozeEditing.hint(for: cloze)
+        #expect(applied(edit, to: text) == "{{c1::Paris::}}")
+        #expect(edit.selection == NSRange(location: 13, length: 0))
+        let hinted = "{{c1::Paris::city}}"
+        let withHint = try #require(ClozeEditing.cloze(at: NSRange(location: 8, length: 0), in: hinted))
+        #expect(ClozeEditing.hint(for: withHint).selection == NSRange(location: 13, length: 4), "the hint there, selected")
+    }
+
+    @Test func renumberPutsThemInOrderWithoutGaps() {
+        let edit = ClozeEditing.renumberedInOrder("{{c3::a}} {{c1::b}} {{c3::c}}", keeping: NSRange(location: 28, length: 0))
+        #expect(edit?.replacement == "{{c1::a}} {{c2::b}} {{c1::c}}")
+        #expect(ClozeEditing.renumberedInOrder("{{c1::a}} {{c2::b}}", keeping: NSRange(location: 0, length: 0)) == nil, "already in order")
+    }
+
+    @Test func eachCardNumberIsCountedOnce() {
+        #expect(ClozeEditing.numbers(in: "{{c2::a}} {{c1::b}} {{c2::c}} {{c10::d}}") == [1, 2, 10])
+        #expect(ClozeEditing.numbers(in: "{{c::x}} {c1::y} plain").isEmpty, "not deletions")
+    }
+
+    @Test func theClozeFieldIsTheOneItsTemplateReadsWithTheClozeFilter() {
+        let fields = ["Text", "Back Extra"]
+        #expect(NotetypeInfo.clozeFieldNames(in: ["{{cloze:Text}}"], fieldNames: fields) == ["Text"])
+        #expect(NotetypeInfo.clozeFieldNames(
+            in: ["{{#Back Extra}}{{Back Extra}}{{/Back Extra}} {{type:cloze:Text}}"],
+            fieldNames: fields
+        ) == ["Text"])
+        #expect(NotetypeInfo.clozeFieldNames(in: ["{{Text}}"], fieldNames: fields).isEmpty)
+        #expect(NotetypeInfo.clozeFieldNames(in: ["{{ cloze : Back Extra }}"], fieldNames: fields) == ["Back Extra"])
+    }
+
+    private func applied(_ edit: ClozeEditing.Edit, to text: String) -> String {
+        (text as NSString).replacingCharacters(in: edit.range, with: edit.replacement)
+    }
+}

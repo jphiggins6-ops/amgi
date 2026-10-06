@@ -137,10 +137,13 @@ struct NoteEditorContent: View {
                             Text(name)
                                 .amgiFont(.caption)
                                 .foregroundStyle(palette.textSecondary)
-                            RichNoteFieldEditor(htmlText: $model[fieldAt: index])
+                            RichNoteFieldEditor(htmlText: $model[fieldAt: index], clozeTools: model.isClozeField(index))
                                 // Rebuilt after a paste: an editor settles
                                 // on plain text or HTML once, as it opens.
                                 .id(model.pasteCount)
+                            if model.isClozeField(index) {
+                                ClozeFieldSummary(html: model[fieldAt: index])
+                            }
                             if !FieldText.isPlain(model[fieldAt: index]) {
                                 Text("Shown as HTML so its formatting and pictures are kept. Return starts a new line.")
                                     .amgiFont(.caption)
