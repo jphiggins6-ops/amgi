@@ -135,8 +135,18 @@ struct EditImageOcclusionContent: View {
             }
 
             Section("Content") {
-                TextField("Header", text: $model.header)
-                TextField("Extra info shown on the back", text: $model.backExtra)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Header")
+                        .amgiFont(.caption)
+                        .foregroundStyle(palette.textSecondary)
+                    RichNoteFieldEditor(htmlText: $model.header)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Extra info shown on the back")
+                        .amgiFont(.caption)
+                        .foregroundStyle(palette.textSecondary)
+                    RichNoteFieldEditor(htmlText: $model.backExtra)
+                }
             }
 
             Section {

@@ -110,18 +110,7 @@ final class NoteEditorModel {
     /// Saves a pasted picture to the media folder; returns the tag that
     /// shows it on the card.
     private func storePicture(_ data: Data) async -> String? {
-        let prepared = await Task.detached(priority: .userInitiated) {
-            PreparedImage.prepare(data)
-        }.value
-        guard let prepared else { return nil }
-        let filename = NotePaste.mediaFilename(for: prepared.data, fileExtension: prepared.fileExtension)
-        do {
-            try await mediaClient.save(prepared.data, filename)
-            return NotePaste.imageTag(filename: filename)
-        } catch {
-            Log.browse.error("Saving a pasted picture failed: \(error)")
-            return nil
-        }
+        await NotePaste.storePicture(data, in: mediaClient)
     }
 
     // MARK: - Save

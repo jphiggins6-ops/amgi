@@ -3,11 +3,14 @@
 //  BrowseFeature
 //
 
+import AnkiClients
+import AppCore
 import CoreTransferable
 import CryptoKit
 import Foundation
 import ImageIO
 import MnemonicCore
+import OSLog
 import UniformTypeIdentifiers
 
 /// One thing on the clipboard, as the editor's Paste button hands it over.
@@ -58,6 +61,43 @@ enum NotePaste {
 
     static func imageTag(filename: String) -> String {
         "<img src=\"\(filename)\">"
+    }
+
+    /// Saves a pasted picture to the media folder, made ready first
+    /// (`PreparedImage`); returns the tag that shows it on the card, or nil
+    /// when it isn't a picture or couldn't be saved.
+    static func storePicture(_ data: Data, in media: MediaClient) async -> String? {
+        let prepared = await Task.detached(priority: .userInitiated) {
+            PreparedImage.prepare(data)
+        }.value
+        guard let prepared else { return nil }
+        let filename = mediaFilename(for: prepared.data, fileExtension: prepared.fileExtension)
+        do {
+            try await media.save(prepared.data, filename)
+            return imageTag(filename: filename)
+        } catch {
+            Log.browse.error("Saving a pasted picture failed: \(error)")
+            return nil
+        }
+    }
+
+    /// `markup` in place of `range` of a field edited as plain text, which
+    /// is edited as HTML source from then on, as it now has a tag: what's
+    /// stored, what the editor shows, and where its cursor goes, just after
+    /// the markup.
+    static func inserting(
+        _ markup: String,
+        intoPlainText text: String,
+        replacing range: NSRange
+    ) -> (stored: String, display: String, caret: Int) {
+        let source = text as NSString
+        let start = min(max(range.location, 0), source.length)
+        let end = min(start + max(range.length, 0), source.length)
+        let upToCaret = FieldText.plainStored(source.substring(to: start)) + markup
+        let stored = upToCaret + FieldText.plainStored(source.substring(from: end))
+        let display = FieldText.sourceDisplay(stored)
+        let caret = min((FieldText.sourceDisplay(upToCaret) as NSString).length, (display as NSString).length)
+        return (stored, display, caret)
     }
 
     /// Named for its content, as Anki names pasted pictures, so pasting the

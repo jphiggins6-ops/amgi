@@ -8,12 +8,19 @@
 import SwiftUI
 
 #if canImport(UIKit)
+import AnkiClients
+import Dependencies
 import UIKit
+import UniformTypeIdentifiers
 
 /// A note field editor. Anki stores fields as HTML fragments; a field with no
 /// markup but line breaks is edited as plain text, anything else as its HTML
 /// source, so editing never deletes formatting or pictures. See `FieldText`.
 /// No `NSAttributedString` HTML parsing: that path is crash-prone.
+///
+/// A picture pasted into the field (Paste in the menu, or ⌘V) is stored as
+/// media and its tag put where the cursor is; a field edited as plain text
+/// is edited as HTML from then on, to hold it.
 struct RichNoteFieldEditor: UIViewRepresentable {
     @Binding var htmlText: String
     var preservesSourceHTML = false
@@ -41,8 +48,19 @@ struct RichNoteFieldEditor: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
+        let textView = PictureTextView()
         textView.delegate = context.coordinator
+        let coordinator = context.coordinator
+        textView.onPastePictures = { [weak coordinator] pictures in
+            coordinator?.pastePictures(pictures)
+        }
+        // Bold, italic and the rest are for HTML: shown once a pasted
+        // picture turns a plain-text field into HTML.
+        coordinator.rebuildToolbar = { [weak coordinator] textView in
+            guard let coordinator else { return }
+            textView.inputAccessoryView = makeInputToolbar(for: textView, coordinator: coordinator)
+            textView.reloadInputViews()
+        }
         textView.isEditable = true
         textView.isSelectable = true
         textView.isScrollEnabled = false
@@ -89,9 +107,12 @@ struct RichNoteFieldEditor: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate {
         @Binding var htmlText: String
-        /// HTML source rather than plain text; see `FieldText`.
-        let editsSource: Bool
+        /// HTML source rather than plain text; see `FieldText`. Settled as
+        /// the field opens, unless a picture is pasted into plain text.
+        private(set) var editsSource: Bool
         weak var textView: UITextView?
+        var rebuildToolbar: ((UITextView) -> Void)?
+        @Dependency(\.mediaClient) private var mediaClient
         var lastRenderedValue: String = ""
         var lastPlainText: String = ""
         var isEditing = false
@@ -141,6 +162,50 @@ struct RichNoteFieldEditor: UIViewRepresentable {
             guard let textView, let range = textView.selectedTextRange else { return }
             textView.replace(range, withText: string)
             commit(textView.text ?? "")
+        }
+
+        /// Pasted pictures, each stored as media, their tags put where the
+        /// cursor is. A tap of feedback says whether it worked.
+        func pastePictures(_ pictures: [Data]) {
+            let media = mediaClient
+            Task { @MainActor [weak self] in
+                var tags: [String] = []
+                for data in pictures {
+                    if let tag = await NotePaste.storePicture(data, in: media) {
+                        tags.append(tag)
+                    }
+                }
+                guard let self else { return }
+                let feedback = UINotificationFeedbackGenerator()
+                guard !tags.isEmpty else {
+                    feedback.notificationOccurred(.error)
+                    return
+                }
+                insertMarkup(tags.joined(separator: "<br>"))
+                feedback.notificationOccurred(.success)
+            }
+        }
+
+        /// `markup` where the cursor is, in place of any selection. A field
+        /// edited as plain text shows no tags, so it's edited as HTML from
+        /// here on.
+        func insertMarkup(_ markup: String) {
+            guard let textView else { return }
+            if editsSource {
+                insert(markup)
+            } else {
+                let inserted = NotePaste.inserting(
+                    markup,
+                    intoPlainText: textView.text ?? "",
+                    replacing: textView.selectedRange
+                )
+                editsSource = true
+                textView.text = inserted.display
+                textView.selectedRange = NSRange(location: inserted.caret, length: 0)
+                commit(inserted.display)
+                rebuildToolbar?(textView)
+            }
+            Self.keepCaretVisible(in: textView)
         }
 
         func wrapSelection(prefix: String, suffix: String) {
@@ -430,6 +495,65 @@ private extension RichNoteFieldEditor.Coordinator {
             )
         }
         return output
+    }
+}
+
+// MARK: - Pasting pictures
+
+/// A text view whose Paste takes pictures as well as text: offered whenever
+/// there's a picture on the clipboard, and handed to `onPastePictures`
+/// rather than pasted as text. A picture copied along with its link or
+/// caption pastes as the picture, as with the editor's Paste button.
+private final class PictureTextView: UITextView {
+    var onPastePictures: (([Data]) -> Void)?
+
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        if action == #selector(UIResponderStandardEditActions.paste(_:)),
+           isEditable, onPastePictures != nil, UIPasteboard.general.hasImages {
+            return true
+        }
+        return super.canPerformAction(action, withSender: sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        let pasteboard = UIPasteboard.general
+        if let onPastePictures, pasteboard.hasImages {
+            let pictures = Self.pictures(on: pasteboard)
+            if !pictures.isEmpty {
+                onPastePictures(pictures)
+                return
+            }
+        }
+        super.paste(sender)
+    }
+
+    /// Each picture on the clipboard as it was copied, where it can be: a
+    /// GIF keeps moving and a PNG its see-through parts. Otherwise as UIKit
+    /// holds it.
+    private static func pictures(on pasteboard: UIPasteboard) -> [Data] {
+        var pictures: [Data] = []
+        for item in pasteboard.items {
+            let imageTypes = item.keys
+                .compactMap { key in UTType(key).map { (key: key, type: $0) } }
+                .filter { $0.type.conforms(to: .image) }
+                .sorted { preference($0.type) < preference($1.type) }
+            if let data = imageTypes.lazy.compactMap({ item[$0.key] as? Data }).first {
+                pictures.append(data)
+            } else if let data = imageTypes.lazy.compactMap({ (item[$0.key] as? UIImage)?.pngData() }).first {
+                pictures.append(data)
+            }
+        }
+        if pictures.isEmpty {
+            pictures = (pasteboard.images ?? []).compactMap { $0.pngData() }
+        }
+        return pictures
+    }
+
+    private static func preference(_ type: UTType) -> Int {
+        if type.conforms(to: .gif) { return 0 }
+        if type.conforms(to: .png) { return 1 }
+        if type.conforms(to: .jpeg) { return 2 }
+        return 3
     }
 }
 

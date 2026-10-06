@@ -47,6 +47,25 @@ import UniformTypeIdentifiers
         #expect(NotePaste.html(forText: "\n \n").isEmpty)
     }
 
+    @Test func aPicturePastedIntoPlainTextGoesWhereTheCursorIs() {
+        let tag = NotePaste.imageTag(filename: "a.png")
+        let pasted = NotePaste.inserting(tag, intoPlainText: "Hello\nworld", replacing: NSRange(location: 5, length: 0))
+        #expect(pasted.stored == "Hello<img src=\"a.png\"><br>world")
+        #expect(pasted.display == "Hello<img src=\"a.png\"><br>\nworld", "shown as HTML from now on")
+        #expect(pasted.caret == ("Hello" + tag as NSString).length, "the cursor just after the picture")
+    }
+
+    @Test func aPicturePastedOverASelectionReplacesIt() {
+        let pasted = NotePaste.inserting("<img src=\"b.jpg\">", intoPlainText: "a < b, c", replacing: NSRange(location: 4, length: 1))
+        #expect(pasted.stored == "a &lt; <img src=\"b.jpg\">, c", "the rest still escaped as typed text")
+    }
+
+    @Test func aCursorPastTheEndPastesAtTheEnd() {
+        let pasted = NotePaste.inserting("<img src=\"c.gif\">", intoPlainText: "end", replacing: NSRange(location: NSNotFound, length: 0))
+        #expect(pasted.stored == "end<img src=\"c.gif\">")
+        #expect(pasted.caret == (pasted.display as NSString).length)
+    }
+
     @Test func aPictureIsNamedForItsContentAsAnkiNamesPastes() {
         let name = NotePaste.mediaFilename(for: Data("abc".utf8), fileExtension: "jpg")
         #expect(name == "paste-a9993e364706816aba3e25717850c26c9cd0d89d.jpg")
