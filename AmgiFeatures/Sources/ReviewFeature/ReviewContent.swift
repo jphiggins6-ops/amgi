@@ -74,7 +74,11 @@ struct ReviewContent: View {
                 #endif
 
                 if showRemainingDays && session.startError == nil {
-                    ReviewProgressBar(session: session)
+                    HStack(spacing: AmgiSpacing.sm) {
+                        ReviewProgressBar(session: session)
+                        ReviewPositionCounter(session: session)
+                    }
+                    .padding(.horizontal)
                 }
 
                 if showTimeLeft && session.startError == nil && !session.isFinished {
@@ -126,36 +130,23 @@ struct ReviewContent: View {
             #endif
             .navigationBarTitleDisplayMode(.inline)
             #if canImport(UIKit)
+            // Six items, no more: past what fits, iOS tucks the rest, the
+            // menu among them, behind a "⋯" of its own. Undo is in the menu,
+            // and the card count beside the progress bar.
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
                     Button {
                         onDismiss()
                     } label: {
                         Image(systemName: "xmark")
                     }
                     .accessibilityLabel("Close")
-                }
-                ToolbarItem(placement: .topBarLeading) {
                     ReviewEditButton(session: session, destination: $destination, shortcutEnabled: keyboardActive)
-                }
-                ToolbarItem(placement: .topBarLeading) {
                     HandsFreeButton(controller: handsFree) { toggleHandsFree() }
                 }
-                ToolbarItem(placement: .principal) {
-                    ReviewDeckTitle(session: session)
-                }
-                if showRemainingDays {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        ReviewPositionCounter(session: session)
-                    }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    ReviewFlagButton(session: session, cardActions: cardActions)
                     MnemonicCaptureButton(session: session, destination: $destination)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    ReviewUndoButton(session: session, shortcutEnabled: keyboardActive)
-                }
-                ToolbarItem(placement: .topBarTrailing) {
                     CardActionsMenu(
                         session: session,
                         cardActions: cardActions,
@@ -163,10 +154,24 @@ struct ReviewContent: View {
                         confirmDeleteNote: $confirmDeleteNote,
                         showTimeLeft: $showTimeLeft,
                         onExplain: { explain() },
+                        showsFlags: false,
+                        showsUndo: true,
                         isHandsFreeOn: handsFree.isOn,
                         onToggleHandsFree: { toggleHandsFree() }
                     )
                 }
+            }
+            // ⌘Z still undoes from a keyboard, with Undo in the menu.
+            .background {
+                Button {
+                    session.undo()
+                } label: {
+                    EmptyView()
+                }
+                .keyboardShortcut(keyboardActive ? KeyboardShortcut("z", modifiers: .command) : nil)
+                .disabled(!session.canUndo)
+                .opacity(0)
+                .accessibilityHidden(true)
             }
             #endif
             .cardActionPresentations(
@@ -457,6 +462,33 @@ private struct ReviewEditButton: View {
     }
 }
 
+/// The card's flag at the top: filled in its colour when the card has one.
+/// A tap shows the flags, to choose another or take it off.
+private struct ReviewFlagButton: View {
+    let session: ReviewSession
+    let cardActions: CardContextMenuModel
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Menu {
+            if let cardId = session.currentCardId {
+                CardFlagPicker(model: cardActions, cardId: cardId)
+            }
+        } label: {
+            Image(systemName: flag == 0 ? "flag" : "flag.fill")
+                .foregroundStyle(flag == 0 ? palette.accent : CardFlag.color(flag))
+        }
+        .disabled(session.currentCardId == nil)
+        .accessibilityLabel("Flag")
+        .accessibilityValue(CardFlag.name(flag))
+    }
+
+    private var flag: UInt32 {
+        cardActions.currentFlag & 0b111
+    }
+}
+
 private struct MnemonicCaptureButton: View {
     let session: ReviewSession
     @Binding var destination: ReviewDestination?
@@ -481,6 +513,10 @@ private struct CardActionsMenu: View {
     @Binding var confirmDeleteNote: Bool
     @Binding var showTimeLeft: Bool
     let onExplain: () -> Void
+    /// The flags, unless the top bar has its own flag button.
+    var showsFlags = true
+    /// Undo, when the top bar has no button for it.
+    var showsUndo = false
     var isHandsFreeOn = false
     /// Nil where hands-free isn't available.
     var onToggleHandsFree: (() -> Void)? = nil
@@ -497,8 +533,19 @@ private struct CardActionsMenu: View {
 
     var body: some View {
         Menu {
-            if let cardId = session.currentCardId {
+            if showsFlags, let cardId = session.currentCardId {
                 CardFlagPicker(model: cardActions, cardId: cardId)
+            }
+
+            if showsUndo {
+                Section {
+                    Button {
+                        session.undo()
+                    } label: {
+                        Label("Undo", systemImage: "arrow.uturn.backward")
+                    }
+                    .disabled(!session.canUndo)
+                }
             }
 
             Section {
@@ -580,9 +627,10 @@ private struct CardActionsMenu: View {
                 )
             }
         } label: {
+            // Coloured for the card's flag where there's no flag button.
             Image(systemName: "ellipsis.circle")
                 .foregroundStyle(
-                    cardActions.currentFlag == 0
+                    !showsFlags || cardActions.currentFlag == 0
                         ? palette.accent
                         : CardFlag.color(cardActions.currentFlag)
                 )
@@ -607,7 +655,6 @@ private struct ReviewProgressBar: View {
                 .scaleEffect(x: fraction, y: 1, anchor: .leading)
         }
         .frame(height: 3)
-        .padding(.horizontal)
         .padding(.top, 6)
         .padding(.bottom, 2)
         .animation(AmgiMotion.standard, value: fraction)
