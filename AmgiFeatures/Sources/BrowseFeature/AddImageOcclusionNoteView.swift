@@ -55,6 +55,16 @@ struct AddImageOcclusionNoteView: View {
                 Text("The note hasn't been saved yet. Discarding loses the image and its masks.")
             }
             .toolbar {
+                // The deck as a small menu, in place of a section of the form.
+                ToolbarItem(placement: .principal) {
+                    ChoiceChip(
+                        title: "Deck",
+                        systemImage: "tray.full",
+                        choices: model.decks.filter { !$0.isFiltered }.map { (id: $0.id, name: $0.name) },
+                        selection: $model.selectedDeckId,
+                        showsLastPartOnly: true
+                    )
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         if model.hasUnsavedChanges {
@@ -112,25 +122,6 @@ struct AddImageOcclusionContent: View {
 
     var body: some View {
         Form {
-            Section("Deck") {
-                Picker("Deck", selection: $model.selectedDeckId) {
-                    ForEach(model.decks) { deck in
-                        Text(deck.name).tag(deck.id)
-                    }
-                }
-            }
-
-            Section {
-                Text("Add Image Occlusion")
-                    .foregroundStyle(palette.textPrimary)
-            } header: {
-                Text("Note Type")
-            } footer: {
-                Text("Pick an image, draw occlusions over the regions you want to test, then save.")
-                    .amgiFont(.caption)
-                    .foregroundStyle(palette.textSecondary)
-            }
-
             Section {
                 // Resolved in the (main-actor) ViewBuilder and captured by
                 // value: the PhotosPicker label closure is Sendable, so it
@@ -151,6 +142,10 @@ struct AddImageOcclusionContent: View {
                 }
             } header: {
                 Text("Image")
+            } footer: {
+                Text("Pick an image, draw occlusions over the regions you want to test, then save.")
+                    .amgiFont(.caption)
+                    .foregroundStyle(palette.textSecondary)
             }
 
             if let uiImage = model.selectedImage {
@@ -185,13 +180,7 @@ struct AddImageOcclusionContent: View {
             }
 
             Section {
-                TextField("Tags", text: $model.tagsText)
-            } header: {
-                Text("Tags")
-            } footer: {
-                Text("Space-separated")
-                    .amgiFont(.caption)
-                    .foregroundStyle(palette.textSecondary)
+                TagsRow(tags: $model.tagsText)
             }
 
             if let err = model.errorMessage {

@@ -150,13 +150,7 @@ struct EditImageOcclusionContent: View {
             }
 
             Section {
-                TextField("Tags", text: $model.tagsText)
-            } header: {
-                Text("Tags")
-            } footer: {
-                Text("Space-separated")
-                    .amgiFont(.caption)
-                    .foregroundStyle(palette.textSecondary)
+                TagsRow(tags: $model.tagsText)
             }
 
             if let err = model.saveError {

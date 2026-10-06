@@ -52,6 +52,25 @@ package struct AddNoteView: View {
                     Text("The note hasn't been added yet. Discarding loses what you typed.")
                 }
                 .toolbar {
+                    // Note type and deck as two small menus, in place of
+                    // two sections of the form.
+                    ToolbarItem(placement: .principal) {
+                        HStack(spacing: AmgiSpacing.sm) {
+                            ChoiceChip(
+                                title: "Note Type",
+                                systemImage: "rectangle.on.rectangle",
+                                choices: model.notetypeNames,
+                                selection: $model.selectedNotetypeId
+                            )
+                            ChoiceChip(
+                                title: "Deck",
+                                systemImage: "tray.full",
+                                choices: model.addableDecks.map { (id: $0.id, name: $0.name) },
+                                selection: $model.selectedDeckId,
+                                showsLastPartOnly: true
+                            )
+                        }
+                    }
                     ToolbarItem(placement: .cancellationAction) {
                         Button(model.addedCount > 0 ? "Done" : "Cancel") {
                             if model.hasUnsavedChanges {
@@ -76,6 +95,13 @@ package struct AddNoteView: View {
                 }
                 .overlay { addedToast }
                 .sensoryFeedback(.success, trigger: model.addedCount)
+                // Up front rather than at the foot of the form, where the
+                // keyboard would cover it.
+                .alert("Couldn’t Add", isPresented: addFailed) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(verbatim: model.errorMessage ?? "")
+                }
                 .task { await model.loadData() }
         }
     }
@@ -84,6 +110,13 @@ package struct AddNoteView: View {
 // MARK: - Added
 
 private extension AddNoteView {
+    var addFailed: Binding<Bool> {
+        Binding(
+            get: { model.errorMessage != nil },
+            set: { if !$0 { model.errorMessage = nil } }
+        )
+    }
+
     func showAdded() {
         addedToastTask?.cancel()
         addedToastTask = Task {
@@ -122,25 +155,6 @@ struct AddNoteContent: View {
 
     var body: some View {
         Form {
-            Section("Deck") {
-                Picker("Deck", selection: $model.selectedDeckId) {
-                    ForEach(model.decks) { deck in
-                        Text(deck.name).tag(deck.id)
-                    }
-                }
-            }
-
-            Section("Note Type") {
-                Picker("Type", selection: $model.selectedNotetypeId) {
-                    ForEach(model.notetypeNames, id: \.id) { entry in
-                        Text(entry.name).tag(entry.id)
-                    }
-                }
-                .onChange(of: model.selectedNotetypeId) {
-                    Task { await model.loadFields() }
-                }
-            }
-
             Section {
                 ForEach(Array(model.fieldNames.enumerated()), id: \.element) { index, name in
                     VStack(alignment: .leading, spacing: 4) {
@@ -166,25 +180,85 @@ struct AddNoteContent: View {
                         }
                     }
                 }
-            } header: {
-                Text("Fields")
             } footer: {
-                Text("A pinned field keeps what's in it for the next note: a source, a picture, or a sentence you're making several cards from.")
+                Text("Pinned fields keep what's in them for the next note.")
             }
 
-            Section("Tags") {
-                TextField("Tags (space-separated)", text: $model.tags)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
+            Section {
+                TagsRow(tags: $model.tags)
             }
+        }
+        .onChange(of: model.selectedNotetypeId) {
+            Task { await model.loadFields() }
+        }
+    }
+}
 
-            if let errorMessage = model.errorMessage {
-                Section {
-                    Text(errorMessage)
-                        .foregroundStyle(palette.danger)
-                        .amgiFont(.caption)
+// MARK: - Compact rows
+
+/// A small menu in the top bar for one choice, such as the note type or the
+/// deck: an icon and the choice's name; a tap lists them all, the current
+/// one ticked. A part of the bar instead of a section of the form.
+struct ChoiceChip<ID: Hashable>: View {
+    let title: String
+    let systemImage: String
+    let choices: [(id: ID, name: String)]
+    @Binding var selection: ID
+    /// Just the last part of a name like "Medicine::Cardiology", as a deck's.
+    var showsLastPartOnly = false
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Menu {
+            Picker(title, selection: $selection) {
+                ForEach(choices, id: \.id) { choice in
+                    Text(verbatim: choice.name).tag(choice.id)
                 }
             }
+            .pickerStyle(.inline)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: systemImage)
+                    .imageScale(.small)
+                Text(verbatim: shownName)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.down")
+                    .font(.caption2.weight(.bold))
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(palette.accent)
+            .frame(maxWidth: 150)
+        }
+        .accessibilityLabel(title)
+        .accessibilityValue(currentName)
+    }
+
+    private var currentName: String {
+        choices.first { $0.id == selection }?.name ?? "Choose"
+    }
+
+    private var shownName: String {
+        guard showsLastPartOnly, let last = currentName.split(separator: "::").last else { return currentName }
+        return String(last)
+    }
+}
+
+/// Tags in a single row, with no section header.
+struct TagsRow: View {
+    @Binding var tags: String
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        HStack(spacing: AmgiSpacing.sm) {
+            Image(systemName: "tag")
+                .foregroundStyle(palette.textTertiary)
+                .accessibilityHidden(true)
+            TextField("Tags, separated by spaces", text: $tags)
+                .autocorrectionDisabled()
+                .textInputAutocapitalization(.never)
         }
     }
 }
@@ -237,7 +311,7 @@ struct ClozeFieldSummary: View {
     private var summary: String {
         let numbers = ClozeEditing.numbers(in: html)
         guard !numbers.isEmpty else {
-            return "Select the words to hide, then tap Cloze above the keyboard. Each number (c1, c2…) is a card of its own; Same Card hides more on the same card."
+            return "Select words to hide, then tap Cloze above the keyboard."
         }
         let cards = numbers.map { "c\($0)" }.joined(separator: ", ")
         return numbers.count == 1 ? "Makes 1 card: \(cards)" : "Makes \(numbers.count) cards: \(cards)"

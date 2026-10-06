@@ -131,12 +131,25 @@ struct NoteEditorContent: View {
     var body: some View {
         ScrollViewReader { proxy in
             Form {
-                Section("Fields") {
+                Section {
                     ForEach(Array(model.fieldNames.enumerated()), id: \.element) { index, name in
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(name)
-                                .amgiFont(.caption)
-                                .foregroundStyle(palette.textSecondary)
+                            HStack(spacing: 6) {
+                                Text(name)
+                                    .amgiFont(.caption)
+                                    .foregroundStyle(palette.textSecondary)
+                                // A tag, rather than a line under each such
+                                // field saying it's shown as HTML.
+                                if !FieldText.isPlain(model[fieldAt: index]) {
+                                    Text(verbatim: "HTML")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(palette.textTertiary)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(palette.textTertiary.opacity(0.15), in: Capsule())
+                                        .accessibilityLabel("Edited as HTML, so its formatting is kept")
+                                }
+                            }
                             RichNoteFieldEditor(htmlText: $model[fieldAt: index], clozeTools: model.isClozeField(index))
                                 // Rebuilt after a paste: an editor settles
                                 // on plain text or HTML once, as it opens.
@@ -144,20 +157,13 @@ struct NoteEditorContent: View {
                             if model.isClozeField(index) {
                                 ClozeFieldSummary(html: model[fieldAt: index])
                             }
-                            if !FieldText.isPlain(model[fieldAt: index]) {
-                                Text("Shown as HTML so its formatting and pictures are kept. Return starts a new line.")
-                                    .amgiFont(.caption)
-                                    .foregroundStyle(palette.textSecondary)
-                            }
                         }
                         .id(name)
                     }
                 }
 
-                Section("Tags") {
-                    TextField("Tags (space-separated)", text: $model.tags)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                Section {
+                    TagsRow(tags: $model.tags)
                 }
             }
             .onChange(of: model.pasteCount) { _, _ in

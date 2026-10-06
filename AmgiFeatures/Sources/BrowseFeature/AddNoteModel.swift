@@ -118,15 +118,27 @@ final class AddNoteModel {
         addedCount += 1
     }
 
+    private static let lastDeckKey = "add_note_last_deck"
+
     private static func pinnedFieldsKey(for notetype: NotetypeID) -> String {
         "add_note_pinned_fields_\(notetype.rawValue)"
     }
 
+    /// The decks a note can go in: filtered decks only borrow cards.
+    var addableDecks: [DeckInfo] {
+        decks.filter { !$0.isFiltered }
+    }
+
     func loadData() async {
         decks = (try? await deckClient.fetchAll()) ?? []
-        if let preselectedDeckId, decks.contains(where: { $0.id == preselectedDeckId }) {
+        let addable = addableDecks
+        let lastUsed = UserDefaults.standard.object(forKey: Self.lastDeckKey) as? Int64
+        // The deck it was opened from, else the one the last note went in.
+        if let preselectedDeckId, addable.contains(where: { $0.id == preselectedDeckId }) {
             selectedDeckId = preselectedDeckId
-        } else if let first = decks.first {
+        } else if let lastUsed, let deck = addable.first(where: { $0.id.rawValue == lastUsed }) {
+            selectedDeckId = deck.id
+        } else if let first = addable.first ?? decks.first {
             selectedDeckId = first.id
         }
 
@@ -222,6 +234,7 @@ final class AddNoteModel {
             // tree cache conservatively so every host (DeckDetail, reader
             // lookup, Browse) sees fresh counts.
             store.apply(CollectionChanges(card: true, note: true, studyQueues: true))
+            UserDefaults.standard.set(deckID.rawValue, forKey: Self.lastDeckKey)
             return true
         } catch {
             errorMessage = "Failed to add note: \(error.localizedDescription)"
