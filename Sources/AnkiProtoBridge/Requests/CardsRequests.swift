@@ -48,6 +48,21 @@ extension Request where Response == Void {
         )
     }
 
+    /// Moves the given cards to deck `deckId`, as Anki's Change Deck does.
+    public static func setDeck(cardIds: [CardID], deckId: DeckID) -> Self {
+        Self(
+            serviceId: ServiceID.cards,
+            methodId: CardsMethod.setDeck,
+            encode: {
+                var proto = Anki_Cards_SetDeckRequest()
+                proto.cardIds = cardIds.map(\.rawValue)
+                proto.deckID = deckId.rawValue
+                return try proto.serializedData()
+            },
+            decode: { _ in () }
+        )
+    }
+
     /// Removes the given cards (and the parent note if all its cards
     /// disappear).
     public static func removeCards(cardIds: [CardID]) -> Self {

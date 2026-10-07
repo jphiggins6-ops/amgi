@@ -33,6 +33,8 @@ public struct CardClient: Sendable {
     public var getCardFlags: @Sendable (_ cardId: CardID) async throws -> UInt32
     public var hasUndoableAction: @Sendable () async throws -> Bool
     public var removeCards: @Sendable (_ cardIds: [CardID]) async throws -> Void
+    /// Moves cards to another deck, as Anki's Change Deck does.
+    public var setDeck: @Sendable (_ cardIds: [CardID], _ deckId: DeckID) async throws -> Void
 }
 
 extension CardClient: TestDependencyKey {

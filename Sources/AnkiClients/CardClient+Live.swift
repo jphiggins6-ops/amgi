@@ -106,6 +106,10 @@ extension CardClient: DependencyKey {
             removeCards: { cardIds in
                 try await backend.invoke(.removeCards(cardIds: cardIds))
                 logger.info("Removed \(cardIds.count) cards")
+            },
+            setDeck: { cardIds, deckId in
+                try await backend.invoke(.setDeck(cardIds: cardIds, deckId: deckId))
+                logger.info("Moved \(cardIds.count) cards to deck \(deckId.rawValue)")
             }
         )
     }()

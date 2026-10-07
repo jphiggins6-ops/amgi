@@ -44,6 +44,7 @@ enum CollectionOpsMethod {
 enum CardsMethod {
     static let getCard: UInt32 = 0
     static let removeCards: UInt32 = 2
+    static let setDeck: UInt32 = 3
     static let setFlag: UInt32 = 4
 }
 

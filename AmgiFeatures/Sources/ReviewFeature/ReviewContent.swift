@@ -60,6 +60,8 @@ struct ReviewContent: View {
     #if canImport(UIKit)
     /// Reads cards aloud and takes answers by voice; see `HandsFreeController`.
     @State private var handsFree = HandsFreeController()
+    /// Whether the card is in the 1_critical deck; see `CriticalDeckButton`.
+    @State private var critical = CriticalDeckModel()
     #endif
 
     private var keyboardActive: Bool {
@@ -122,6 +124,14 @@ struct ReviewContent: View {
                 if opened { handsFree.stop() }
             }
             .onDisappear { handsFree.stop() }
+            .task(id: session.currentCardId) {
+                await critical.load(session.currentCardId)
+            }
+            .alert("Couldn’t Move the Card", isPresented: criticalMoveFailed) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(verbatim: critical.problem ?? "")
+            }
             .alert("Hands-Free Stopped", isPresented: handsFreeStoppedAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -130,7 +140,7 @@ struct ReviewContent: View {
             #endif
             .navigationBarTitleDisplayMode(.inline)
             #if canImport(UIKit)
-            // Six items, no more: past what fits, iOS tucks the rest, the
+            // Seven items, no more: past what fits, iOS tucks the rest, the
             // menu among them, behind a "⋯" of its own. Undo is in the menu,
             // and the card count beside the progress bar.
             .toolbar {
@@ -145,6 +155,7 @@ struct ReviewContent: View {
                     HandsFreeButton(controller: handsFree) { toggleHandsFree() }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    CriticalDeckButton(model: critical, cardId: session.currentCardId)
                     ReviewFlagButton(session: session, cardActions: cardActions)
                     MnemonicCaptureButton(session: session, destination: $destination)
                     CardActionsMenu(
@@ -273,6 +284,15 @@ struct ReviewContent: View {
     }
 
     #if canImport(UIKit)
+    private var criticalMoveFailed: Binding<Bool> {
+        Binding(
+            get: { critical.problem != nil },
+            set: { shown in
+                if !shown { critical.problem = nil }
+            }
+        )
+    }
+
     /// Up while there's a reason hands-free stopped by itself.
     private var handsFreeStoppedAlert: Binding<Bool> {
         Binding(
@@ -459,6 +479,95 @@ private struct ReviewEditButton: View {
         .disabled(session.currentNote == nil)
         .keyboardShortcut(shortcutEnabled ? KeyboardShortcut("e", modifiers: .command) : nil)
         .accessibilityLabel("Edit Note")
+    }
+}
+
+// MARK: - 1_critical
+
+/// Whether the card on screen is in the 1_critical deck (or a deck inside
+/// it), and moving it there. A card in a filtered deck counts by the deck
+/// it came from, as Anki keeps it.
+@MainActor
+@Observable
+final class CriticalDeckModel {
+    static let deckName = "1_critical"
+
+    private(set) var isCritical = false
+    private(set) var isMoving = false
+    var problem: String?
+
+    @ObservationIgnored @Dependency(\.cardClient) private var cardClient
+    @ObservationIgnored @Dependency(\.deckClient) private var deckClient
+    @ObservationIgnored @Dependency(\.collectionStore) private var store
+
+    func load(_ cardId: CardID?) async {
+        guard let cardId, let card = try? await cardClient.fetch(cardId) else {
+            isCritical = false
+            return
+        }
+        let decks = (try? await deckClient.fetchAll()) ?? []
+        let home = card.odid.rawValue != 0 ? card.odid : card.did
+        guard let critical = Self.criticalDeck(in: decks),
+              let homeName = decks.first(where: { $0.id == home })?.name else {
+            isCritical = false
+            return
+        }
+        isCritical = homeName == critical.name || homeName.hasPrefix(critical.name + "::")
+    }
+
+    /// Moves the card into 1_critical, made first if there's none.
+    func move(_ cardId: CardID) async {
+        guard !isCritical, !isMoving else { return }
+        isMoving = true
+        defer { isMoving = false }
+        do {
+            let decks = try await deckClient.fetchAll()
+            let deckId: DeckID
+            if let critical = Self.criticalDeck(in: decks) {
+                deckId = critical.id
+            } else {
+                let made = try await deckClient.create(Self.deckName)
+                store.apply(made.changes)
+                deckId = made.id
+            }
+            try await cardClient.setDeck([cardId], deckId)
+            store.apply(CollectionChanges(card: true, studyQueues: true))
+            isCritical = true
+        } catch {
+            problem = "It couldn’t be moved to \(Self.deckName): \(error.localizedDescription)"
+        }
+    }
+
+    /// The deck named 1_critical: at the top level, or else anywhere, by
+    /// the last part of its name; never a filtered deck.
+    static func criticalDeck(in decks: [DeckInfo]) -> DeckInfo? {
+        let candidates = decks.filter { !$0.isFiltered }
+        return candidates.first { $0.name.caseInsensitiveCompare(deckName) == .orderedSame }
+            ?? candidates.first { deck in
+                deck.name.split(separator: "::").last.map { $0.caseInsensitiveCompare(deckName) == .orderedSame } ?? false
+            }
+    }
+}
+
+/// The card's place in 1_critical, at the top: a filled red mark when it's
+/// there; tapped while it isn't, it moves the card in.
+private struct CriticalDeckButton: View {
+    let model: CriticalDeckModel
+    let cardId: CardID?
+
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Button {
+            guard let cardId else { return }
+            Task { await model.move(cardId) }
+        } label: {
+            Image(systemName: model.isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle")
+                .foregroundStyle(model.isCritical ? palette.danger : palette.accent)
+        }
+        .disabled(cardId == nil || model.isMoving)
+        .sensoryFeedback(.success, trigger: model.isCritical) { _, isCritical in isCritical }
+        .accessibilityLabel(model.isCritical ? "In 1_critical" : "Move to 1_critical")
     }
 }
 
