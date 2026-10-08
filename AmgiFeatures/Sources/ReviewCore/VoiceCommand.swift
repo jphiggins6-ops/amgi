@@ -6,7 +6,7 @@
 public import AnkiKit
 
 /// A word said in hands-free mode, and what it does.
-public enum VoiceCommand: Equatable, Sendable {
+public enum VoiceCommand: Hashable, Sendable {
     /// Show the answer.
     case reveal
     /// Rate the card. On the question side the answer is read first.
@@ -27,14 +27,51 @@ public enum VoiceCommand: Equatable, Sendable {
         "bury", "red flag", "orange flag", "flag red", "flag orange",
     ]
 
+    /// Phrases for the speech recognizer's own word list for hands-free,
+    /// with how strongly each is favoured: the commands as said, alone and
+    /// in the ways people put them.
+    public static let trainingPhrases: [(phrase: String, weight: Int)] = [
+        ("show", 400), ("show me", 100), ("show answer", 100), ("answer", 200), ("flip", 200),
+        ("again", 400), ("hard", 400), ("good", 400), ("easy", 400),
+        ("repeat", 300), ("repeat that", 100), ("undo", 300), ("stop", 300),
+        ("bury", 300), ("bury it", 100),
+        ("red flag", 300), ("flag red", 200), ("orange flag", 300), ("flag orange", 200), ("flag", 200),
+    ]
+
     /// The last command in what was heard: later words win, so "hmm…
     /// good" is Good. Nil when nothing in it is a command.
     public static func lastCommand(in transcript: String) -> VoiceCommand? {
-        let words = transcript.lowercased().split { !$0.isLetter }.map(String.init)
+        let words = wordsSaid(in: transcript)
         for index in words.indices.reversed() {
             if let command = command(at: index, in: words) { return command }
         }
         return nil
+    }
+
+    /// The last command heard more often than `echo` allows: `echo` counts
+    /// the commands in what was being read aloud while the microphone
+    /// listened, which it may have heard too. Said beyond that, it's you.
+    public static func lastCommand(in transcript: String, beyond echo: [VoiceCommand: Int]) -> VoiceCommand? {
+        guard !echo.isEmpty else { return lastCommand(in: transcript) }
+        let words = wordsSaid(in: transcript)
+        let heard = words.indices.compactMap { command(at: $0, in: words) }
+        var counts: [VoiceCommand: Int] = [:]
+        for command in heard { counts[command, default: 0] += 1 }
+        return heard.last { counts[$0, default: 0] > echo[$0, default: 0] }
+    }
+
+    /// Every command in `text`, counted: the ones a card's reading says.
+    public static func counts(in text: String) -> [VoiceCommand: Int] {
+        let words = wordsSaid(in: text)
+        var counts: [VoiceCommand: Int] = [:]
+        for index in words.indices {
+            if let command = command(at: index, in: words) { counts[command, default: 0] += 1 }
+        }
+        return counts
+    }
+
+    private static func wordsSaid(in text: String) -> [String] {
+        text.lowercased().split { !$0.isLetter }.map(String.init)
     }
 
     /// The command at `words[index]`. A flag's colour goes either side of

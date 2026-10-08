@@ -26,7 +26,10 @@ struct HandsFreeButton: View {
                 Section {
                     Text(verbatim: status)
                     if let heard = controller.lastHeard {
-                        Text(verbatim: "Heard “\(heard)”")
+                        Text(verbatim: "Last command: “\(heard)”")
+                    }
+                    if let transcript = controller.lastTranscript {
+                        Text(verbatim: "Last heard: “\(transcript)”")
                     }
                     if let voiceProblem = controller.voiceProblem {
                         Text(verbatim: "The iPhone voice is reading: \(voiceProblem)")

@@ -53,6 +53,9 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.handsFreeSharperListening))
     private var handsFreeSharperListening: Bool = false
 
+    @Shared(.appStorage(ReviewPreferences.Keys.handsFreeEchoCancelling))
+    private var handsFreeEchoCancelling: Bool = true
+
     @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceCards))
     private var aiVoiceCards: String = ReviewPreferences.aiVoiceCards.rawValue
 
@@ -184,6 +187,13 @@ struct ReviewSettingsView: View {
                 )
                 SettingsSeparator()
                 SettingsToggleRow(
+                    title: "Talk over the reading",
+                    systemImage: "waveform.badge.mic",
+                    tone: .review,
+                    isOn: Binding($handsFreeEchoCancelling)
+                )
+                SettingsSeparator()
+                SettingsToggleRow(
                     title: "Sharper listening (online)",
                     systemImage: "ear",
                     tone: .accent,
@@ -220,7 +230,7 @@ struct ReviewSettingsView: View {
                     $handsFreeVoice.withLock { $0 = "" }
                 }
             }
-            SettingsFootnote("Start it with the headphones button while reviewing. Each question is read aloud: say “show” to turn the card over and hear just the answer (the Extra isn’t read), then “again”, “hard”, “good” or “easy”. Rate straight away and the card is rated without the answer being read. “Repeat”, “undo”, “bury”, “red flag”, “orange flag” and “stop” work any time. If it often misses what you say, turn on Sharper listening: Apple’s servers hear the commands instead of the phone, catching more, a moment later, while you’re online. With headphones you can talk over the reading; out of the speaker, wait for it to finish. The screen stays on while it runs, unless you switch that off; it also keeps going if you lock the phone.")
+            SettingsFootnote("Start it with the headphones button while reviewing. Each question is read aloud: say “show” to turn the card over and hear just the answer (the Extra isn’t read), then “again”, “hard”, “good” or “easy”. Rate straight away and the card is rated without the answer being read. “Repeat”, “undo”, “bury”, “red flag”, “orange flag” and “stop” work any time. If it often misses what you say, turn on Sharper listening: Apple’s servers hear the commands instead of the phone, catching more, a moment later, while you’re online. You can answer while it’s still reading, out of the speaker or in the car too: Talk over the reading uses the iPhone’s call echo cancelling and noise suppression, taking the reading out of what the microphone hears. Switch it off if the reading sounds quieter than you’d like; then, without headphones, wait for the reading to finish. The screen stays on while it runs, unless you switch that off; it also keeps going if you lock the phone.")
             SettingsFootnote("The iPhone voice reads every card the AI voice doesn’t, for free. For one that sounds far more natural, download a Premium or Enhanced voice, such as Ava or Zoe, in the Settings app: Accessibility → Read & Speak → Voices → English. Amgi uses the best one you have unless you pick one here.")
         }
     }

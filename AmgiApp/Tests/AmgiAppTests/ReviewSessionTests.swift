@@ -795,6 +795,19 @@ import AnkiServices
         #expect(VoiceCommand.lastCommand(in: "heart") == .rate(.hard), "as hard is often heard")
     }
 
+    @Test func aCommandTheReadingSaysCountsOnlyWhenSaidAgain() {
+        let echo = VoiceCommand.counts(in: "A good sign: red flag, then good again.")
+        #expect(echo[.rate(.good)] == 2)
+        #expect(echo[.rate(.again)] == 1)
+        #expect(echo[.flag(1)] != nil)
+        #expect(VoiceCommand.lastCommand(in: "good", beyond: echo) == nil, "the reading's own word")
+        #expect(VoiceCommand.lastCommand(in: "good sign red flag then good again", beyond: echo) == nil, "all of it heard back")
+        #expect(VoiceCommand.lastCommand(in: "good good good", beyond: echo) == .rate(.good), "said once more than read")
+        #expect(VoiceCommand.lastCommand(in: "good easy", beyond: echo) == .rate(.easy), "not in the reading")
+        #expect(VoiceCommand.lastCommand(in: "easy then good", beyond: echo) == .rate(.easy), "the echo doesn't win")
+        #expect(VoiceCommand.lastCommand(in: "good", beyond: [:]) == .rate(.good), "nothing being read")
+    }
+
     @Test func theAnswerIsReadWithoutTheQuestionAboveIt() {
         let back = #"<style>.card{}</style><div class="card">Ptosis, miosis, anhidrosis?<hr id=answer>Horner syndrome<br>Sympathetic lesion</div>"#
         #expect(SpokenCardText.answer(fromHTML: back) == "Horner syndrome. Sympathetic lesion.")

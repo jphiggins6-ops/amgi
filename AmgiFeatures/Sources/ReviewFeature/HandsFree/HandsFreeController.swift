@@ -49,6 +49,9 @@ final class HandsFreeController {
     private(set) var phase: Phase = .off
     /// The last command heard, e.g. "good".
     private(set) var lastHeard: String?
+    /// What the microphone last made out, command or not: to see what it
+    /// hears when it misses one.
+    private(set) var lastTranscript: String?
     /// Why hands-free stopped by itself, when it did.
     private(set) var problem: String?
     /// Why the AI voice couldn't record the last card, while the iPhone's
@@ -64,6 +67,10 @@ final class HandsFreeController {
     @ObservationIgnored private var loop: Task<Void, Never>?
     /// The reading and listening under way, so `stop()` can end it.
     @ObservationIgnored private var currentRace: Race?
+    /// The commands the side being read says, while the microphone may
+    /// hear it; see `speakThenListen`.
+    @ObservationIgnored private var echo: [VoiceCommand: Int] = [:]
+    @ObservationIgnored private var readingDone = true
     /// The AI voice, nil when it's switched off. Read as hands-free starts.
     @ObservationIgnored private var aiVoice: String?
     /// Whether cards are rewritten the way a tutor would say them first.
@@ -147,6 +154,9 @@ final class HandsFreeController {
             end(problem: "The microphone couldn't start: \(error.localizedDescription)")
             return
         }
+        // With echo cancelling, the reading goes through the microphone's
+        // engine, so it's taken out of what the microphone hears.
+        speaker.playback = listener.playback
         ScreenAwake.keep(.handsFree, ReviewPreferences.handsFreeKeepsScreenOn)
         // Cards queued for the AI voice wait: this reads, and readies, its own.
         CardVoicePreparation.shared.handsFreeStarted()
@@ -264,12 +274,33 @@ final class HandsFreeController {
     ) async -> Outcome {
         guard !Task.isCancelled else { return .cancelled }
         let mark = SessionMark(session)
-        let bargeIn = HandsFreeAudioSession.canListenWhileSpeaking
+        // The microphone may have restarted without echo cancelling.
+        speaker.playback = listener.playback
+        // Headphones keep the reading out of the microphone; echo
+        // cancelling takes it out. Either way, you can talk over it.
+        let headphones = HandsFreeAudioSession.canListenWhileSpeaking
+        let bargeIn = headphones || listener.cancelsEcho
+        // Out loud, a little of the reading may still get through: the
+        // commands its own words make, heard no more often than it says
+        // them, don't count.
+        echo = !headphones && listener.cancelsEcho && reads
+            ? VoiceCommand.counts(in: spokenText(of: reading))
+            : [:]
+        readingDone = !reads
         let race = Race()
         currentRace = race
 
         race.add(Task {
             if reads { await self.read(reading) }
+            self.readingDone = true
+            if bargeIn, !self.echo.isEmpty {
+                // Listening afresh shortly, without the reading in it, so
+                // a word the card said counts when you say it once.
+                Task {
+                    try? await Task.sleep(for: .milliseconds(800))
+                    if !race.isOver { self.listener.stop() }
+                }
+            }
             guard !race.isOver else { return }
             guard listenAfter else {
                 race.finish(.spoke)
@@ -340,7 +371,7 @@ final class HandsFreeController {
     private func hear() async -> Outcome? {
         var quickFailures = 0
         while !Task.isCancelled {
-            let stream: AsyncThrowingStream<String, any Error>
+            let stream: AsyncThrowingStream<[String], any Error>
             do {
                 stream = try listener.start()
             } catch {
@@ -351,11 +382,16 @@ final class HandsFreeController {
             }
             defer { listener.stop() }
             let began = ContinuousClock.now
+            // A recognition begun while the side was read may have heard it.
+            let heardBack = readingDone ? [:] : echo
             do {
-                for try await transcript in stream {
-                    if let command = VoiceCommand.lastCommand(in: transcript) {
-                        lastHeard = command.title
-                        return .heard(command)
+                for try await guesses in stream {
+                    if let best = guesses.first, !best.isEmpty { lastTranscript = best }
+                    for guess in guesses {
+                        if let command = VoiceCommand.lastCommand(in: guess, beyond: heardBack) {
+                            lastHeard = command.title
+                            return .heard(command)
+                        }
                     }
                 }
                 quickFailures = 0
@@ -373,6 +409,14 @@ final class HandsFreeController {
     }
 
     // MARK: - Voices
+
+    /// The words a side is read in: its script or recording's, or the card's.
+    private func spokenText(of reading: Reading) -> String {
+        guard aiVoice != nil else {
+            return reading.side == .question ? reading.card.question : reading.card.answer
+        }
+        return recorder.text(of: reading.side, for: reading.card, rewrites: aiRewrites)
+    }
 
     /// A side of the card to read.
     private struct Reading: Sendable {
