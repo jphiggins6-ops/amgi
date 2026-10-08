@@ -784,6 +784,15 @@ import AnkiServices
         #expect(VoiceCommand.lastCommand(in: "OK stop") == .stop)
         #expect(VoiceCommand.lastCommand(in: "what was that") == nil)
         #expect(VoiceCommand.lastCommand(in: "goodness") == nil, "only whole words")
+        #expect(VoiceCommand.lastCommand(in: "bury") == .bury)
+        #expect(VoiceCommand.lastCommand(in: "berry") == .bury, "as it's often heard")
+        #expect(VoiceCommand.lastCommand(in: "red flag") == .flag(1))
+        #expect(VoiceCommand.lastCommand(in: "Flag red") == .flag(1))
+        #expect(VoiceCommand.lastCommand(in: "orange flag") == .flag(2))
+        #expect(VoiceCommand.lastCommand(in: "flag orange") == .flag(2))
+        #expect(VoiceCommand.lastCommand(in: "flag") == .flag(1), "red, as in Anki")
+        #expect(VoiceCommand.lastCommand(in: "the red one") == nil, "a colour alone is nothing")
+        #expect(VoiceCommand.lastCommand(in: "heart") == .rate(.hard), "as hard is often heard")
     }
 
     @Test func theAnswerIsReadWithoutTheQuestionAboveIt() {

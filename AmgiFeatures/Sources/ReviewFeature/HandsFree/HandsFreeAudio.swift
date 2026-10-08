@@ -296,7 +296,10 @@ final class VoiceListener {
         request.shouldReportPartialResults = true
         request.taskHint = .confirmation
         request.contextualStrings = VoiceCommand.vocabulary
-        if recognizer.supportsOnDeviceRecognition {
+        request.addsPunctuation = false
+        // On the phone it's quick and private; Apple's servers, with
+        // Sharper listening on, catch more.
+        if recognizer.supportsOnDeviceRecognition, !ReviewPreferences.handsFreeSharperListening {
             request.requiresOnDeviceRecognition = true
         }
         route.send(to: request)
@@ -326,7 +329,14 @@ final class VoiceListener {
     ) -> @Sendable (SFSpeechRecognitionResult?, (any Error)?) -> Void {
         { result, error in
             if let result {
-                continuation.yield(result.bestTranscription.formattedString)
+                // The best guess first, then the next few: a command missed
+                // in the first ("heart") is often in the next ("hard").
+                for transcription in result.transcriptions.prefix(4) {
+                    continuation.yield(transcription.formattedString)
+                }
+                if result.transcriptions.isEmpty {
+                    continuation.yield(result.bestTranscription.formattedString)
+                }
                 if result.isFinal { continuation.finish() }
             }
             if let error { continuation.finish(throwing: error) }

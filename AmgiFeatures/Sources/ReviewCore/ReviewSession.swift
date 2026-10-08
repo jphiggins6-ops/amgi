@@ -383,6 +383,54 @@ public final class ReviewSession {
         }
     }
 
+    /// Buries the card on screen until tomorrow and moves on, as Anki's
+    /// Bury does from the reviewer. Undo takes it back.
+    public func buryCurrentCard() {
+        guard !isAdvancing, let queued = currentQueuedCard else { return }
+        isAdvancing = true
+        let cardId = queued.card.id
+        let cardClient = self.cardClient
+        let scheduler = self.scheduler
+        let notes = self.notes
+        let notetypes = self.notetypes
+        let notetypesClient = self.notetypesClient
+        let cardRendering = self.cardRendering
+        let fetchLimit = queueFetchLimit
+
+        Task {
+            defer { isAdvancing = false }
+            do {
+                try await cardClient.bury(cardId)
+                let queue = try await Task.detached {
+                    try scheduler.getQueuedCards(fetchLimit)
+                }.value
+                // Undo now takes back the bury, which isn't an answer.
+                canUndo = true
+                lastRating = nil
+                lastTalliedHomeDeck = nil
+                lastAnsweredCard = nil
+                lastProblemCard = nil
+                cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats, skipping: seenThisSession)
+                remainingCounts = DeckCounts(
+                    newCount: queue.newCount,
+                    learnCount: queue.learningCount,
+                    reviewCount: queue.reviewCount
+                )
+                await advanceToNextCard(notes: notes, notetypes: notetypes, notetypesClient: notetypesClient, cardRendering: cardRendering)
+            } catch {
+                Log.review.error("Bury failed: \(error)")
+                answerError = error.localizedDescription
+            }
+        }
+    }
+
+    /// Flags the card on screen: 1 red, 2 orange, and so on; 0 takes the
+    /// flag off.
+    public func flagCurrentCard(_ value: UInt32) async throws {
+        guard let cardId = currentCardId else { return }
+        try await cardClient.flag(cardId, value)
+    }
+
     public func undo() {
         guard canUndo, !isAdvancing else { return }
         isAdvancing = true

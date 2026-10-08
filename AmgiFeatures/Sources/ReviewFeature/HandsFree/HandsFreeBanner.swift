@@ -37,6 +37,7 @@ struct HandsFreeButton: View {
                 Text(verbatim: "“Show” to turn the card over")
                 Text(verbatim: "“Again”, “hard”, “good” or “easy” to rate it")
                 Text(verbatim: "“Repeat”, “undo” or “stop”")
+                Text(verbatim: "“Bury”, “red flag” or “orange flag”")
             }
             Section {
                 Button(action: onToggle) {

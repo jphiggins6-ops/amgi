@@ -161,6 +161,8 @@ final class HandsFreeController {
             aiVoiceSince = nil
         }
         voiceProblem = nil
+        // Off after a flag, so the side isn't read again: it listens on.
+        var reads = true
 
         while !Task.isCancelled {
             if session.isFinished {
@@ -186,7 +188,9 @@ final class HandsFreeController {
                 }
                 prepareUpcomingCard(session)
                 let question = Reading(side: .question, card: card, records: recordsCard)
-                switch await speakThenListen(question, then: .waitingToShow, session: session, listenAfter: true) {
+                let heardOnQuestion = await speakThenListen(question, then: .waitingToShow, session: session, listenAfter: true, reads: reads)
+                reads = true
+                switch heardOnQuestion {
                 case .heard(.reveal):
                     session.revealAnswer()
                 case .heard(.rate(let rating)):
@@ -198,6 +202,11 @@ final class HandsFreeController {
                 case .heard(.stop):
                     end(problem: nil)
                     return
+                case .heard(.bury):
+                    await bury(session)
+                case .heard(.flag(let value)):
+                    await flag(value, session)
+                    reads = false
                 case .failed(let message):
                     end(problem: message)
                     return
@@ -208,7 +217,9 @@ final class HandsFreeController {
                 show(.readingAnswer)
                 prepareUpcomingCard(session)
                 let answer = Reading(side: .answer, card: card, records: recordsCard)
-                switch await speakThenListen(answer, then: .waitingForRating, session: session, listenAfter: true) {
+                let heardOnAnswer = await speakThenListen(answer, then: .waitingForRating, session: session, listenAfter: true, reads: reads)
+                reads = true
+                switch heardOnAnswer {
                 case .heard(.rate(let rating)):
                     await rate(rating, session)
                 case .heard(.undo):
@@ -216,6 +227,11 @@ final class HandsFreeController {
                 case .heard(.stop):
                     end(problem: nil)
                     return
+                case .heard(.bury):
+                    await bury(session)
+                case .heard(.flag(let value)):
+                    await flag(value, session)
+                    reads = false
                 case .heard(.reveal), .heard(.repeatSide):
                     // Read the answer again.
                     continue
@@ -243,7 +259,8 @@ final class HandsFreeController {
         _ reading: Reading,
         then waiting: Phase,
         session: ReviewSession,
-        listenAfter: Bool
+        listenAfter: Bool,
+        reads: Bool = true
     ) async -> Outcome {
         guard !Task.isCancelled else { return .cancelled }
         let mark = SessionMark(session)
@@ -252,7 +269,7 @@ final class HandsFreeController {
         currentRace = race
 
         race.add(Task {
-            await self.read(reading)
+            if reads { await self.read(reading) }
             guard !race.isOver else { return }
             guard listenAfter else {
                 race.finish(.spoke)
@@ -416,6 +433,22 @@ final class HandsFreeController {
         guard !session.isAdvancing else { return }
         session.answer(rating: rating)
         await settle(session)
+    }
+
+    private func bury(_ session: ReviewSession) async {
+        guard !session.isAdvancing else { return }
+        await speaker.speak("Buried.")
+        session.buryCurrentCard()
+        await settle(session)
+    }
+
+    private func flag(_ value: UInt32, _ session: ReviewSession) async {
+        do {
+            try await session.flagCurrentCard(value)
+            await speaker.speak("\(CardFlag.name(value)) flag.")
+        } catch {
+            await speaker.speak("The flag couldn't be set.")
+        }
     }
 
     private func undo(_ session: ReviewSession) async {

@@ -39,6 +39,7 @@ public enum ReviewPreferences {
         public static let handsFreeSpeed = "review_pref_hands_free_speed"
         public static let handsFreeVoice = "review_pref_hands_free_voice"
         public static let handsFreeKeepsScreenOn = "review_pref_hands_free_keeps_screen_on"
+        public static let handsFreeSharperListening = "review_pref_hands_free_sharper_listening"
         /// The switch that came before `aiVoiceCards`, read to carry over
         /// a choice of no AI voice.
         public static let aiVoiceForNewCards = "review_pref_ai_voice_for_new_cards"
@@ -60,6 +61,12 @@ public enum ReviewPreferences {
     /// switched off in Settings.
     public static var handsFreeKeepsScreenOn: Bool {
         UserDefaults.standard.object(forKey: Keys.handsFreeKeepsScreenOn) as? Bool ?? true
+    }
+
+    /// Hands-free commands heard by Apple's servers rather than on the
+    /// phone: they catch more, a moment later, and need a connection.
+    public static var handsFreeSharperListening: Bool {
+        UserDefaults.standard.bool(forKey: Keys.handsFreeSharperListening)
     }
 
     /// The iPhone voice picked for hands-free mode, by identifier; nil for

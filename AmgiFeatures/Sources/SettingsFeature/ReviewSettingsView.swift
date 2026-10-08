@@ -50,6 +50,9 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.handsFreeKeepsScreenOn))
     private var handsFreeKeepsScreenOn: Bool = true
 
+    @Shared(.appStorage(ReviewPreferences.Keys.handsFreeSharperListening))
+    private var handsFreeSharperListening: Bool = false
+
     @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceCards))
     private var aiVoiceCards: String = ReviewPreferences.aiVoiceCards.rawValue
 
@@ -180,6 +183,13 @@ struct ReviewSettingsView: View {
                     isOn: Binding($handsFreeKeepsScreenOn)
                 )
                 SettingsSeparator()
+                SettingsToggleRow(
+                    title: "Sharper listening (online)",
+                    systemImage: "ear",
+                    tone: .accent,
+                    isOn: Binding($handsFreeSharperListening)
+                )
+                SettingsSeparator()
                 SettingsPickerRow(
                     title: "iPhone voice",
                     systemImage: "waveform",
@@ -210,7 +220,7 @@ struct ReviewSettingsView: View {
                     $handsFreeVoice.withLock { $0 = "" }
                 }
             }
-            SettingsFootnote("Start it from ⋯ while reviewing. Each question is read aloud: say “show” to turn the card over and hear just the answer (the Extra isn’t read), then “again”, “hard”, “good” or “easy”. Rate straight away and the card is rated without the answer being read. “Repeat”, “undo” and “stop” work any time. With headphones you can talk over the reading; out of the speaker, wait for it to finish. The screen stays on while it runs, unless you switch that off; it also keeps going if you lock the phone.")
+            SettingsFootnote("Start it with the headphones button while reviewing. Each question is read aloud: say “show” to turn the card over and hear just the answer (the Extra isn’t read), then “again”, “hard”, “good” or “easy”. Rate straight away and the card is rated without the answer being read. “Repeat”, “undo”, “bury”, “red flag”, “orange flag” and “stop” work any time. If it often misses what you say, turn on Sharper listening: Apple’s servers hear the commands instead of the phone, catching more, a moment later, while you’re online. With headphones you can talk over the reading; out of the speaker, wait for it to finish. The screen stays on while it runs, unless you switch that off; it also keeps going if you lock the phone.")
             SettingsFootnote("The iPhone voice reads every card the AI voice doesn’t, for free. For one that sounds far more natural, download a Premium or Enhanced voice, such as Ava or Zoe, in the Settings app: Accessibility → Read & Speak → Voices → English. Amgi uses the best one you have unless you pick one here.")
         }
     }
