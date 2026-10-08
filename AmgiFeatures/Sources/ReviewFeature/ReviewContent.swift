@@ -515,42 +515,94 @@ final class CriticalDeckModel {
         isCritical = homeName == critical.name || homeName.hasPrefix(critical.name + "::")
     }
 
-    /// Moves the card into 1_critical, made first if there's none.
-    func move(_ cardId: CardID) async {
-        guard !isCritical, !isMoving else { return }
+    /// Moves the card into 1_critical (made first if there's none), or,
+    /// when it's there, back out: to the deck it was in before, or
+    /// 1_Neuro_Life when that's not known or gone.
+    func toggle(_ cardId: CardID) async {
+        guard !isMoving else { return }
         isMoving = true
         defer { isMoving = false }
+        let movingIn = !isCritical
         do {
             let decks = try await deckClient.fetchAll()
-            let deckId: DeckID
-            if let critical = Self.criticalDeck(in: decks) {
-                deckId = critical.id
+            let target: DeckID
+            if movingIn {
+                if let card = try? await cardClient.fetch(cardId) {
+                    remember(card.odid.rawValue != 0 ? card.odid : card.did, for: cardId)
+                }
+                target = try await deck(named: Self.deckName, in: decks)
+            } else if let previous = previousDeck(of: cardId),
+                      let deck = decks.first(where: { $0.id == previous && !$0.isFiltered }),
+                      !isInCritical(deck.name, decks: decks) {
+                target = deck.id
             } else {
-                let made = try await deckClient.create(Self.deckName)
-                store.apply(made.changes)
-                deckId = made.id
+                target = try await deck(named: Self.fallbackDeckName, in: decks)
             }
-            try await cardClient.setDeck([cardId], deckId)
+            try await cardClient.setDeck([cardId], target)
             store.apply(CollectionChanges(card: true, studyQueues: true))
-            isCritical = true
+            if !movingIn { forget(cardId) }
+            isCritical = movingIn
         } catch {
-            problem = "It couldn’t be moved to \(Self.deckName): \(error.localizedDescription)"
+            let destination = movingIn ? Self.deckName : "its deck"
+            problem = "It couldn’t be moved to \(destination): \(error.localizedDescription)"
         }
     }
 
-    /// The deck named 1_critical: at the top level, or else anywhere, by
-    /// the last part of its name; never a filtered deck.
+    /// Where a card leaving 1_critical goes when the deck it came from
+    /// isn't known or is gone.
+    static let fallbackDeckName = "1_Neuro_Life"
+
+    /// The deck named `name`, made first if there's none.
+    private func deck(named name: String, in decks: [DeckInfo]) async throws -> DeckID {
+        if let deck = Self.deck(named: name, in: decks) { return deck.id }
+        let made = try await deckClient.create(name)
+        store.apply(made.changes)
+        return made.id
+    }
+
+    private func isInCritical(_ name: String, decks: [DeckInfo]) -> Bool {
+        guard let critical = Self.criticalDeck(in: decks) else { return false }
+        return name == critical.name || name.hasPrefix(critical.name + "::")
+    }
+
+    // The deck each card was in before it went into 1_critical, kept on
+    // the phone by card.
+    private static let previousDecksKey = "critical_previous_decks"
+
+    private func remember(_ deck: DeckID, for cardId: CardID) {
+        var previous = UserDefaults.standard.dictionary(forKey: Self.previousDecksKey) ?? [:]
+        previous[String(cardId.rawValue)] = deck.rawValue
+        UserDefaults.standard.set(previous, forKey: Self.previousDecksKey)
+    }
+
+    private func previousDeck(of cardId: CardID) -> DeckID? {
+        let previous = UserDefaults.standard.dictionary(forKey: Self.previousDecksKey) ?? [:]
+        return (previous[String(cardId.rawValue)] as? Int64).map { DeckID($0) }
+    }
+
+    private func forget(_ cardId: CardID) {
+        var previous = UserDefaults.standard.dictionary(forKey: Self.previousDecksKey) ?? [:]
+        previous.removeValue(forKey: String(cardId.rawValue))
+        UserDefaults.standard.set(previous, forKey: Self.previousDecksKey)
+    }
+
     static func criticalDeck(in decks: [DeckInfo]) -> DeckInfo? {
+        deck(named: deckName, in: decks)
+    }
+
+    /// The deck named `name`: at the top level, or else anywhere, by the
+    /// last part of its name; never a filtered deck. Case doesn't matter.
+    static func deck(named name: String, in decks: [DeckInfo]) -> DeckInfo? {
         let candidates = decks.filter { !$0.isFiltered }
-        return candidates.first { $0.name.caseInsensitiveCompare(deckName) == .orderedSame }
+        return candidates.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
             ?? candidates.first { deck in
-                deck.name.split(separator: "::").last.map { $0.caseInsensitiveCompare(deckName) == .orderedSame } ?? false
+                deck.name.split(separator: "::").last.map { $0.caseInsensitiveCompare(name) == .orderedSame } ?? false
             }
     }
 }
 
 /// The card's place in 1_critical, at the top: a filled red mark when it's
-/// there; tapped while it isn't, it moves the card in.
+/// there. A tap moves the card in, or back out to the deck it came from.
 private struct CriticalDeckButton: View {
     let model: CriticalDeckModel
     let cardId: CardID?
@@ -560,14 +612,14 @@ private struct CriticalDeckButton: View {
     var body: some View {
         Button {
             guard let cardId else { return }
-            Task { await model.move(cardId) }
+            Task { await model.toggle(cardId) }
         } label: {
             Image(systemName: model.isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle")
                 .foregroundStyle(model.isCritical ? palette.danger : palette.accent)
         }
         .disabled(cardId == nil || model.isMoving)
-        .sensoryFeedback(.success, trigger: model.isCritical) { _, isCritical in isCritical }
-        .accessibilityLabel(model.isCritical ? "In 1_critical" : "Move to 1_critical")
+        .sensoryFeedback(.success, trigger: model.isCritical)
+        .accessibilityLabel(model.isCritical ? "In 1_critical. Move it back out" : "Move to 1_critical")
     }
 }
 
