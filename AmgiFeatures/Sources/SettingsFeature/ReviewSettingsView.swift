@@ -21,7 +21,7 @@ struct ReviewSettingsView: View {
     private var openLinksExternally: Bool = true
 
     @Shared(.appStorage(ReviewPreferences.Keys.cardContentAlignment))
-    private var cardContentAlignment: String = CardWebViewContentAlignment.center.rawValue
+    private var cardContentAlignment: String = CardWebViewContentAlignment.top.rawValue
 
     @Shared(.appStorage(ReviewPreferences.Keys.autoMatchCardBackground))
     private var autoMatchCardBackground: Bool = true
@@ -600,8 +600,8 @@ struct ReviewSettingsView: View {
                     tone: .link,
                     selection: Binding($cardContentAlignment)
                 ) {
-                    Text("Center").tag(CardWebViewContentAlignment.center.rawValue)
                     Text("Top").tag(CardWebViewContentAlignment.top.rawValue)
+                    Text("Center").tag(CardWebViewContentAlignment.center.rawValue)
                 }
             }
         }

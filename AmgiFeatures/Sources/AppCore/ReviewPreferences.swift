@@ -30,7 +30,10 @@ public enum ReviewPreferences {
         public static let lookupPopupEnabled = "review_pref_lookup_popup_enabled"
         public static let lookupPopupFrontEnabled = "review_pref_lookup_popup_front_enabled"
         public static let lookupPopupBackEnabled = "review_pref_lookup_popup_back_enabled"
-        public static let cardContentAlignment = "review_pref_card_content_alignment"
+        /// Where a card starts: near the top by default, leaving room for
+        /// the answer to run on below. A new key, so the Center that was
+        /// the default before doesn't stay stored in its place.
+        public static let cardContentAlignment = "review_pref_card_content_alignment_2"
         public static let glassAnswerButtons = "review_pref_glass_answer_buttons"
         public static let autoMatchCardBackground = "review_pref_auto_match_card_background"
         public static let defersRepeats = "review_pref_defers_repeats"

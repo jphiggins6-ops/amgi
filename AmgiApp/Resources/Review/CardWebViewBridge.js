@@ -29,6 +29,9 @@ __AMGI_BASE_TAG__
         background-attachment: fixed;
     }
     body.amgi-centered { display: flex; align-items: center; justify-content: center; min-height: calc(100vh - 40px); }
+    /* Top: a little below the top edge, the rest of the screen left for
+       what the answer adds. */
+    body.amgi-top { padding-top: 6vh; }
     /* The answer side starts where the question was (amgiUpdateQA); what it
        adds runs on below, and the page scrolls if it has to. */
     body.amgi-anchored { display: block; }
@@ -160,6 +163,7 @@ function amgiApplyCardState(state) {
     document.body.style.setProperty('--amgi-body-padding-bottom', (s.bodyPaddingBottom || 16) + 'px');
     var anchored = !!s.isAnswerSide && window.__amgiAnchorTop != null;
     document.body.classList.toggle('amgi-centered', !s.alignTop && !anchored);
+    document.body.classList.toggle('amgi-top', !!s.alignTop && !anchored);
     document.body.classList.toggle('amgi-anchored', anchored);
     if (qa) {
         qa.style.setProperty('--amgi-card-padding-bottom', (s.cardPaddingBottom || 0) + 'px');
@@ -168,8 +172,9 @@ function amgiApplyCardState(state) {
 }
 
 // ── Keeping the text in place on the flip ────────────────────────────
-// A question is centred on the screen. Centring the answer too would move
-// the same text up by half of whatever the answer adds, so for a cloze
+// A question starts near the top, or is centred when Settings says so.
+// Centring the answer too would move the same text up by half of
+// whatever the answer adds, so for a cloze
 // with a long Extra the eye has to hunt for the line it was reading. The
 // answer starts where the question was instead: its top is pinned to the
 // question's, what it adds runs on below, and the page scrolls if needed.

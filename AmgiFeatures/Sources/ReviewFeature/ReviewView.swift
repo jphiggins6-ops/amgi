@@ -36,7 +36,7 @@ package struct ReviewView: View {
     private var openLinksExternally: Bool = true
 
     @Shared(.appStorage(ReviewPreferences.Keys.cardContentAlignment))
-    private var cardContentAlignment: String = CardWebViewContentAlignment.center.rawValue
+    private var cardContentAlignment: String = CardWebViewContentAlignment.top.rawValue
 
     @Shared(.appStorage(ReviewPreferences.Keys.autoMatchCardBackground))
     private var autoMatchCardBackground: Bool = true

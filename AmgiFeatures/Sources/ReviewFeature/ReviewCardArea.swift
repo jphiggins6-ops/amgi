@@ -178,7 +178,7 @@ struct ReviewCardArea: View {
                     lookupPopupEnabled: tapLookup && !session.requiresTypedAnswerInput,
                     dictionaryScanLength: dictionaryScanLength,
                     lookupHighlight: lookupHighlight,
-                    contentAlignment: CardWebViewContentAlignment(rawValue: cardContentAlignment) ?? .center,
+                    contentAlignment: CardWebViewContentAlignment(rawValue: cardContentAlignment) ?? .top,
                     onAudioStateChange: { playing in session.updateAudioPlaying(playing) },
                     onCardBackgroundColorChange: { color, isDark in
                         session.updateCardChrome(color: color, isDark: isDark)
