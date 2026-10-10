@@ -25,7 +25,7 @@ import SwiftUINavigation
 // MARK: - Content
 
 /// Pure render surface for a review session: the card/finished views,
-/// toolbar, and edit/lookup sheets. Takes the session read-only plus pref
+/// toolbar, and edit sheets. Takes the session read-only plus pref
 /// values and sheet bindings — no lifecycle, so a `#Preview` renders it
 /// with a stub session and no backend.
 struct ReviewContent: View {
@@ -34,7 +34,6 @@ struct ReviewContent: View {
     let autoMatchCardBackground: Bool
     let openLinksExternally: Bool
     let cardContentAlignment: String
-    let tapLookup: Bool
     let showNextReviewTime: Bool
     @Binding var destination: ReviewDestination?
     /// The estimated time left under the progress bar. A binding so the ⋯
@@ -46,12 +45,8 @@ struct ReviewContent: View {
     let onDismiss: () -> Void
 
     @Environment(\.palette) private var palette
-    /// Supplied by the app root — see `EnvironmentValues.lookupPopup`. Keeping
-    /// the popup itself out of this target is what keeps it off the Cxx chain.
-    @Environment(\.lookupPopup) private var lookupPopup
     @State private var cardActions = CardContextMenuModel()
     @State private var confirmDeleteNote = false
-    @State private var lookupHighlight = LookupHighlight()
     /// Bumped when a ✨ idea is saved; drives the confirmation haptic.
     @State private var mnemonicSavedCount = 0
     /// Bumped when a tap or swipe flags a card, which otherwise shows only
@@ -100,11 +95,8 @@ struct ReviewContent: View {
                         session: session,
                         openLinksExternally: openLinksExternally,
                         cardContentAlignment: cardContentAlignment,
-                        tapLookup: tapLookup,
                         showNextReviewTime: showNextReviewTime,
-                        lookupHighlight: lookupHighlight,
                         shortcutsEnabled: keyboardActive,
-                        lookupQuery: $destination.lookupText,
                         onGesture: { perform($0) },
                         onExplain: { explain() }
                     )
@@ -155,7 +147,7 @@ struct ReviewContent: View {
                     HandsFreeButton(controller: handsFree) { toggleHandsFree() }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    CriticalDeckButton(model: critical, cardId: session.currentCardId)
+                    CriticalDeckButton(model: critical, session: session)
                     ReviewFlagButton(session: session, cardActions: cardActions)
                     MnemonicCaptureButton(session: session, destination: $destination)
                     CardActionsMenu(
@@ -223,15 +215,6 @@ struct ReviewContent: View {
                         initialTemplateIndex: target.ordinal,
                         mode: .currentCard,
                         onSaved: { await session.refreshAfterEdit() }
-                    )
-                }
-            }
-            .sheet(isPresented: Binding($destination.lookup), onDismiss: { lookupHighlight.clear() }) {
-                if let lookupPopup {
-                    lookupPopup.popup(
-                        query: destination.lookupText ?? "",
-                        onMatched: { lookupHighlight.show(matched: $0) },
-                        onDismiss: { destination = nil }
                     )
                 }
             }
@@ -517,9 +500,10 @@ final class CriticalDeckModel {
 
     /// Moves the card into 1_critical (made first if there's none), or,
     /// when it's there, back out: to the deck it was in before, or
-    /// 1_Neuro_Life when that's not known or gone.
-    func toggle(_ cardId: CardID) async {
-        guard !isMoving else { return }
+    /// 1_Neuro_Life when that's not known or gone. True once it's moved.
+    @discardableResult
+    func toggle(_ cardId: CardID) async -> Bool {
+        guard !isMoving else { return false }
         isMoving = true
         defer { isMoving = false }
         let movingIn = !isCritical
@@ -542,9 +526,11 @@ final class CriticalDeckModel {
             store.apply(CollectionChanges(card: true, studyQueues: true))
             if !movingIn { forget(cardId) }
             isCritical = movingIn
+            return true
         } catch {
             let destination = movingIn ? Self.deckName : "its deck"
             problem = "It couldn’t be moved to \(destination): \(error.localizedDescription)"
+            return false
         }
     }
 
@@ -605,14 +591,22 @@ final class CriticalDeckModel {
 /// there. A tap moves the card in, or back out to the deck it came from.
 private struct CriticalDeckButton: View {
     let model: CriticalDeckModel
-    let cardId: CardID?
+    let session: ReviewSession
 
     @Environment(\.palette) private var palette
+
+    private var cardId: CardID? { session.currentCardId }
 
     var body: some View {
         Button {
             guard let cardId else { return }
-            Task { await model.toggle(cardId) }
+            Task {
+                // In its new deck, with that deck's settings, the card is
+                // answered with scheduling worked out again.
+                if await model.toggle(cardId) {
+                    await session.cardMovedDeck()
+                }
+            }
         } label: {
             Image(systemName: model.isCritical ? "exclamationmark.triangle.fill" : "exclamationmark.triangle")
                 .foregroundStyle(model.isCritical ? palette.danger : palette.accent)
@@ -723,15 +717,6 @@ private struct CardActionsMenu: View {
                     Label("Edit Template", systemImage: "square.and.pencil")
                 }
                 .disabled(session.currentTemplateTarget == nil)
-
-                Button {
-                    // Empty initial query opens the popup focused for typing.
-                    // Future enhancement: forward CardWebView text-selection so
-                    // the query is pre-populated.
-                    destination = .lookup("")
-                } label: {
-                    Label("Look Up", systemImage: "character.book.closed")
-                }
 
                 Button {
                     onExplain()
@@ -964,7 +949,6 @@ private struct RoundFinishedView: View {
         autoMatchCardBackground: false,
         openLinksExternally: true,
         cardContentAlignment: CardWebViewContentAlignment.center.rawValue,
-        tapLookup: true,
         showNextReviewTime: true,
         destination: .constant(nil),
         showTimeLeft: .constant(true),
@@ -979,7 +963,6 @@ private struct RoundFinishedView: View {
         autoMatchCardBackground: false,
         openLinksExternally: true,
         cardContentAlignment: CardWebViewContentAlignment.center.rawValue,
-        tapLookup: true,
         showNextReviewTime: true,
         destination: .constant(nil),
         showTimeLeft: .constant(true),
@@ -994,7 +977,6 @@ private struct RoundFinishedView: View {
         autoMatchCardBackground: false,
         openLinksExternally: true,
         cardContentAlignment: CardWebViewContentAlignment.center.rawValue,
-        tapLookup: true,
         showNextReviewTime: true,
         destination: .constant(nil),
         showTimeLeft: .constant(true),
@@ -1010,7 +992,6 @@ private struct RoundFinishedView: View {
         autoMatchCardBackground: false,
         openLinksExternally: true,
         cardContentAlignment: CardWebViewContentAlignment.center.rawValue,
-        tapLookup: true,
         showNextReviewTime: true,
         destination: .constant(nil),
         showTimeLeft: .constant(true),

@@ -255,6 +255,42 @@ extension Request where Response == QueuedCardsResult {
     }
 }
 
+// MARK: - getSchedulingStates
+
+extension Request where Response == CardSchedulingStates {
+    /// A card's scheduling states as they are now, under its deck's
+    /// current settings: for a card moved to another deck mid-review, whose
+    /// states from `getQueuedCards` the engine no longer accepts.
+    public static func getSchedulingStates(cardId: CardID) -> Self {
+        Self(
+            serviceId: ServiceID.scheduler,
+            methodId: SchedulerMethod.getSchedulingStates,
+            encode: {
+                var proto = Anki_Cards_CardId()
+                proto.cid = cardId.rawValue
+                return try proto.serializedData()
+            },
+            decode: { bytes in
+                let resp = try Anki_Scheduler_SchedulingStates(serializedBytes: bytes)
+                let states = ReviewSchedulingStates(
+                    current: SchedulingStateToken(try resp.current.serializedData()),
+                    again:   SchedulingStateToken(try resp.again.serializedData()),
+                    hard:    SchedulingStateToken(try resp.hard.serializedData()),
+                    good:    SchedulingStateToken(try resp.good.serializedData()),
+                    easy:    SchedulingStateToken(try resp.easy.serializedData())
+                )
+                let intervals: [Rating: String] = [
+                    .again: formatInterval(scheduledSecs(resp.again)),
+                    .hard:  formatInterval(scheduledSecs(resp.hard)),
+                    .good:  formatInterval(scheduledSecs(resp.good)),
+                    .easy:  formatInterval(scheduledSecs(resp.easy)),
+                ]
+                return CardSchedulingStates(states: states, nextIntervals: intervals)
+            }
+        )
+    }
+}
+
 // MARK: - computeFsrsParams
 
 extension Request where Response == FsrsOptimizeResult {

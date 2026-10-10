@@ -74,6 +74,28 @@ public struct QueuedReviewCard: Sendable {
     }
 }
 
+/// A card's scheduling states as the engine works them out now, under its
+/// deck's settings as they are, with the interval each answer gives.
+public struct CardSchedulingStates: Sendable {
+    public let states: ReviewSchedulingStates
+    public let nextIntervals: [Rating: String]
+
+    package init(states: ReviewSchedulingStates, nextIntervals: [Rating: String]) {
+        self.states = states
+        self.nextIntervals = nextIntervals
+    }
+}
+
+extension QueuedReviewCard {
+    /// The same card as it is now (`card`), with `fresh` states: after it
+    /// moved to a deck with other settings mid-review, say, when the
+    /// engine no longer takes an answer made with the states it was
+    /// queued with.
+    public func updated(card: CardRecord, scheduling fresh: CardSchedulingStates) -> QueuedReviewCard {
+        QueuedReviewCard(card: card, states: fresh.states, nextIntervals: fresh.nextIntervals)
+    }
+}
+
 public struct QueuedCardsResult: Sendable {
     public let cards: [QueuedReviewCard]
     public let newCount: Int

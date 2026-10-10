@@ -50,9 +50,6 @@ package struct ReviewView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.showTimeLeft))
     private var showTimeLeft: Bool = true
 
-    @Shared(.appStorage(ReaderPreferences.Keys.tapLookup))
-    private var tapLookup: Bool = true
-
     @Shared(.appStorage(ReviewPreferences.Keys.playAudioInSilentMode))
     private var playAudioInSilentMode: Bool = false
 
@@ -94,7 +91,6 @@ package struct ReviewView: View {
             autoMatchCardBackground: autoMatchCardBackground,
             openLinksExternally: openLinksExternally,
             cardContentAlignment: cardContentAlignment,
-            tapLookup: tapLookup,
             showNextReviewTime: showNextReviewTime,
             destination: $destination,
             showTimeLeft: Binding($showTimeLeft),

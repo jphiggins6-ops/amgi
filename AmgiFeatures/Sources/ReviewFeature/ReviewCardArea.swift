@@ -33,19 +33,14 @@ struct ReviewCardArea: View {
     let session: ReviewSession
     let openLinksExternally: Bool
     let cardContentAlignment: String
-    let tapLookup: Bool
     let showNextReviewTime: Bool
-    let lookupHighlight: LookupHighlight
     let shortcutsEnabled: Bool
-    @Binding var lookupQuery: String?
     /// A tap area or swipe on the card; the reviewer decides what it does.
     var onGesture: ((ReviewGesture) -> Void)? = nil
     /// Shows an Explain button over the rating bar once the answer is up.
     var onExplain: (() -> Void)? = nil
 
     @Environment(\.palette) private var palette
-    @Shared(.appStorage(ReaderPreferences.Keys.dictionaryScanLength))
-    private var dictionaryScanLength: Int = 16
     @State private var nativeAudioPlayer = NativeCardAudioPlayer()
 
     private var mediaFolder: URL? { session.mediaFolder }
@@ -175,19 +170,11 @@ struct ReviewCardArea: View {
                     replayRequestID: session.replayRequestID,
                     stopAudioRequestID: session.stopAudioRequestID,
                     openLinksExternally: openLinksExternally,
-                    lookupPopupEnabled: tapLookup && !session.requiresTypedAnswerInput,
-                    dictionaryScanLength: dictionaryScanLength,
-                    lookupHighlight: lookupHighlight,
                     contentAlignment: CardWebViewContentAlignment(rawValue: cardContentAlignment) ?? .top,
                     onAudioStateChange: { playing in session.updateAudioPlaying(playing) },
                     onCardBackgroundColorChange: { color, isDark in
                         session.updateCardChrome(color: color, isDark: isDark)
                     },
-                    // No tap-lookup while the typed-answer input is up — the
-                    // dictionary would hand over the answer to be typed.
-                    onLookupRequested: tapLookup && !session.requiresTypedAnswerInput ? { text, _, _ in
-                        if let text, !text.isEmpty { lookupQuery = text }
-                    } : nil,
                     onShowAnswerRequested: { session.revealAnswer() },
                     onGesture: onGesture
                 )

@@ -76,6 +76,7 @@ enum SchedulerMethod {
     static let rebuildFilteredDeck: UInt32 = 16
     static let scheduleCardsAsNew: UInt32 = 17
     static let setDueDate: UInt32 = 19
+    static let getSchedulingStates: UInt32 = 23
     static let computeFsrsParams: UInt32 = 30
     static let simulateFsrsReview: UInt32 = 33
     static let simulateFsrsWorkload: UInt32 = 34

@@ -424,6 +424,35 @@ public final class ReviewSession {
         }
     }
 
+    /// The card on screen moved to another deck (into 1_critical, say, or
+    /// out of the filtered deck it was studied from). Its scheduling states
+    /// are worked out again under its new deck's settings, as the engine
+    /// refuses an answer made with the ones it was queued with, and the
+    /// answer buttons' intervals change to match. The card stays on screen,
+    /// to be answered as usual.
+    public func cardMovedDeck() async {
+        guard let queued = currentQueuedCard else { return }
+        let cardId = queued.card.id
+        let scheduler = self.scheduler
+        let cardClient = self.cardClient
+        do {
+            let fresh = try await Task.detached {
+                try scheduler.getSchedulingStates(cardId)
+            }.value
+            let card = try await cardClient.fetch(cardId)
+            guard currentQueuedCard?.card.id == cardId else { return }
+            let updated = queued.updated(card: card, scheduling: fresh)
+            currentQueuedCard = updated
+            nextIntervals = updated.nextIntervals
+            if let index = cardQueue.firstIndex(where: { $0.card.id == cardId }) {
+                cardQueue[index] = updated
+            }
+            answerError = nil
+        } catch {
+            Log.review.error("A moved card's scheduling couldn't be refreshed: \(error)")
+        }
+    }
+
     /// Flags the card on screen: 1 red, 2 orange, and so on; 0 takes the
     /// flag off.
     public func flagCurrentCard(_ value: UInt32) async throws {
