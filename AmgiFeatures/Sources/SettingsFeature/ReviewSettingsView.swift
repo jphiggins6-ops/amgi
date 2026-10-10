@@ -68,6 +68,9 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceTogether))
     private var aiVoiceTogether: String = AIVoiceTogether.eachSide.rawValue
 
+    @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceAutoPrepare))
+    private var aiVoiceAutoPrepare: Bool = true
+
     /// The saved Gemini key's kind, nil when there's none.
     @State private var geminiKeyKind = GeminiAPIKey.load().map(GeminiAPIKey.kind(of:))
     @State private var editsGeminiKey = false
@@ -307,6 +310,14 @@ struct ReviewSettingsView: View {
                 }
                 .disabled(aiVoiceIsOff)
                 SettingsSeparator()
+                SettingsToggleRow(
+                    title: "Prepare new cards by itself",
+                    systemImage: "wand.and.stars",
+                    tone: .mature,
+                    isOn: Binding($aiVoiceAutoPrepare)
+                )
+                .disabled(aiVoiceIsOff)
+                SettingsSeparator()
                 SettingsRowLink(title: "Test Recording Together", systemImage: "waveform.badge.magnifyingglass", tone: .info) {
                     AIVoiceTogetherTestView()
                 }
@@ -377,6 +388,9 @@ struct ReviewSettingsView: View {
             }) {
                 GeminiKeySheet()
             }
+            .onChange(of: aiVoiceAutoPrepare) { _, on in
+                if on { preparation.resume() }
+            }
             .onChange(of: aiVoiceTogether) { _, chosen in
                 // Each piece is checked by the iPhone's speech recognition.
                 guard chosen != AIVoiceTogether.eachSide.rawValue else { return }
@@ -425,7 +439,7 @@ struct ReviewSettingsView: View {
             if let daysLeftNote {
                 SettingsFootnote(daysLeftNote)
             }
-            SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or ahead of time with Prepare Cards, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Prepare Cards does the cards due soonest first, a batch at a time. Google lets the Gemini voice make about 100 recordings a day once billing is on for the key, and only about 10 on its free tier; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it. A side at a time, 100 recordings make about 50 cards. Record → Both sides together, or 5, 10 or 20 cards together, reads several sides in one recording, which Google counts as one, then cuts it into a piece per side; the iPhone’s own speech recognition checks each piece says its line, and the ones that don’t are recorded together once more, then on their own. That makes about 100 cards a day, or 400, 800 or 1,600, for the same price. Test Recording Together tries it on ten cards first, to hear beside the ones made a side at a time.")
+            SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or ahead of time with Prepare Cards, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Prepare Cards does the cards due soonest first, a batch at a time. Google lets the Gemini voice make about 100 recordings a day once billing is on for the key, and only about 10 on its free tier; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it. A side at a time, 100 recordings make about 50 cards. Record → Both sides together, or 5, 10 or 20 cards together, reads several sides in one recording, which Google counts as one, then cuts it into a piece per side; the iPhone’s own speech recognition checks each piece says its line, and the ones that don’t are recorded together once more, then on their own. That makes about 100 cards a day, or 400, 800 or 1,600, for the same price. With “Prepare new cards by itself”, every card still without the AI voice is queued the first time, and new cards after that, whenever Amgi opens; the queue is worked through within Google’s daily limit. It carries on when you leave Amgi (on iOS 26, with its progress on the Lock Screen, for as long as iOS allows) and overnight while the iPhone charges. Test Recording Together tries it on ten cards first, to hear beside the ones made a side at a time.")
         }
     }
 
@@ -566,7 +580,7 @@ struct ReviewSettingsView: View {
         guard case .choosing(_, let ready) = preparation.phase else { return "" }
         let readyAlready = ready > 0 ? "\(ready) cards are ready already. " : ""
         let mode = AIVoiceTogether(rawValue: aiVoiceTogether) ?? .eachSide
-        return "\(readyAlready)They’re done soonest due first: what’s due now, then each day’s reviews and new cards, so the cards you’ll see next are ready first. Recording \(mode.title.lowercased()), Google lets the Gemini voice do about \(mode.cardsADay(limit: 100)) cards a day once billing is on for the key, about \(mode.cardsADay(limit: 10)) on its free tier; a bigger batch carries on by itself each day Amgi is open, and waits while hands-free runs. Keep Amgi open while it works: the screen stays on."
+        return "\(readyAlready)They’re done soonest due first: what’s due now, then each day’s reviews and new cards, so the cards you’ll see next are ready first. Recording \(mode.title.lowercased()), Google lets the Gemini voice do about \(mode.cardsADay(limit: 100)) cards a day once billing is on for the key, about \(mode.cardsADay(limit: 10)) on its free tier; a bigger batch carries on by itself each day Amgi is open, and waits while hands-free runs. It carries on when you leave Amgi too (on iOS 26, as long as iOS allows), and overnight while the iPhone charges; while Amgi is open, the screen stays on."
     }
 
     private var geminiKeyTitle: String {

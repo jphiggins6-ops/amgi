@@ -54,6 +54,7 @@ public enum ReviewPreferences {
         /// The cards queued for the AI voice, soonest due first, by id.
         public static let aiVoiceQueue = "review_pref_ai_voice_queue"
         public static let aiVoiceTogether = "review_pref_ai_voice_together"
+        public static let aiVoiceAutoPrepare = "review_pref_ai_voice_auto_prepare"
         public static let appIconBadge = "review_pref_app_icon_badge"
         public static let appIconTurnsGreen = "review_pref_app_icon_turns_green"
     }
@@ -107,6 +108,13 @@ public enum ReviewPreferences {
     /// AI voice reads it. On unless switched off in Settings.
     public static var aiVoiceRewrites: Bool {
         UserDefaults.standard.object(forKey: Keys.aiVoiceRewrites) as? Bool ?? true
+    }
+
+    /// Whether cards without the AI voice are found and prepared by
+    /// themselves, new ones included, whenever Amgi opens and overnight.
+    /// On unless switched off in Settings.
+    public static var aiVoiceAutoPrepare: Bool {
+        UserDefaults.standard.object(forKey: Keys.aiVoiceAutoPrepare) as? Bool ?? true
     }
 
     /// How Prepare Cards records the AI voice: a side at a time unless

@@ -4,6 +4,8 @@
 //
 
 #if canImport(UIKit)
+import BackgroundTasks
+import OSLog
 public import Foundation
 public import Observation
 import UIKit
@@ -52,6 +54,9 @@ public final class CardVoicePreparation {
         case noKey
         /// Three cards in a row couldn't be done; the last one's reason.
         case problems(String)
+        /// In the background, where the iPhone's speech recognition, which
+        /// checks the pieces of recordings made together, doesn't run.
+        case needsAmgiOpen
 
         /// A line for Settings.
         public var status: String {
@@ -68,6 +73,8 @@ public final class CardVoicePreparation {
                 return "No Gemini key."
             case .problems:
                 return "Stopped: three cards in a row couldn’t be done."
+            case .needsAmgiOpen:
+                return "Carries on when Amgi is open."
             }
         }
 
@@ -84,6 +91,8 @@ public final class CardVoicePreparation {
                 return CardVoiceError.noKey.localizedDescription
             case .problems(let reason):
                 return reason
+            case .needsAmgiOpen:
+                return "The iPhone’s speech recognition, which checks each piece of a recording made of several cards, doesn’t run while Amgi is in the background, so the cards wait for Amgi to be open. Nothing was spent on them meanwhile."
             }
         }
     }
@@ -370,10 +379,24 @@ public final class CardVoicePreparation {
 
     // MARK: - The queue
 
-    /// Carries on with the cards queued, when nothing holds them up: when
-    /// Amgi opens, when hands-free ends, and when Google's daily limit may
-    /// have passed.
+    /// Queues any new cards still to do (`queueNewCards`), then carries on
+    /// with the cards queued, when nothing holds them up: when Amgi opens,
+    /// when hands-free ends, and when Google's daily limit may have passed.
+    /// Asks iOS for time overnight too, while there's work.
     public func resume() {
+        guard !isLookingForNewCards else { return }
+        isLookingForNewCards = true
+        Task {
+            await queueNewCards()
+            isLookingForNewCards = false
+            resumeQueue()
+            if ReviewPreferences.aiVoiceAutoPrepare || !queue.isEmpty {
+                CardVoiceBackground.scheduleOvernight()
+            }
+        }
+    }
+
+    private func resumeQueue() {
         guard !isWorking, !queue.isEmpty else { return }
         if handsFreeIsOn { return }
         if let wait = Self.dailyLimitWait {
@@ -394,6 +417,133 @@ public final class CardVoicePreparation {
 
     /// How long after Google's daily limit it tries again by itself.
     private static let retryAfter: TimeInterval = 60 * 60
+
+    // MARK: - New cards, by themselves
+
+    @ObservationIgnored private var isLookingForNewCards = false
+
+    /// Cards that don't have the AI voice yet, queued without Prepare
+    /// Cards, while Settings → Review → AI Voice → Prepare new cards by
+    /// itself is on: the first time, every card still to do, soonest due
+    /// first; after that, the cards added since it last looked (a card's
+    /// id is the moment it was added), behind those queued already.
+    /// Whenever Amgi opens, and overnight.
+    func queueNewCards() async {
+        guard ReviewPreferences.aiVoiceAutoPrepare, !isWorking, let plan = Plan.current, recorder.hasKey else { return }
+        if case .checking = phase { return }
+        let sides = CardVoiceSides()
+        let defaults = UserDefaults.standard
+        let since = defaults.object(forKey: Self.newCardsSinceKey) as? Int64
+        let ids: [CardID]
+        do {
+            if let since {
+                ids = try await sides.cardIds()
+                    .filter { $0.rawValue > since }
+                    .sorted { $0.rawValue < $1.rawValue }
+            } else {
+                CardVoiceLog.shared.add("Looking for every card without the AI voice, to prepare them by themselves")
+                let newPerDay = TodaySnapshotStore.read()?.newTotal ?? 20
+                ids = try await sides.cardIdsByDueDate(newPerDay: newPerDay)
+            }
+        } catch {
+            return
+        }
+        var queued = Set(queue)
+        var found: [CardID] = []
+        for cardId in ids where plan.includes(cardId) && !queued.contains(cardId) {
+            if Task.isCancelled || isWorking { return }
+            guard let html = await sides.sides(of: cardId) else { continue }
+            let card = VoiceCard(front: html.front, back: html.back, deckName: "")
+            guard !card.written.question.isEmpty,
+                  !recorder.isReady(card, voice: plan.voice, rewrites: plan.rewrites)
+            else { continue }
+            found.append(cardId)
+            queued.insert(cardId)
+        }
+        if let newest = ids.map(\.rawValue).max() {
+            defaults.set(max(newest, since ?? 0), forKey: Self.newCardsSinceKey)
+        } else if since == nil {
+            defaults.set(Int64(0), forKey: Self.newCardsSinceKey)
+        }
+        guard !found.isEmpty else { return }
+        queue += found
+        CardVoiceLog.shared.add(since == nil
+            ? "Queued \(found.count) cards without the AI voice, to be prepared by themselves"
+            : "Queued \(found.count) new \(found.count == 1 ? "card" : "cards") for the AI voice")
+    }
+
+    /// The newest card looked at by `queueNewCards`, by id.
+    private static let newCardsSinceKey = "ai_voice_new_cards_since"
+
+    // MARK: - In the background
+
+    /// What iOS lent for the work in the background, if anything.
+    @ObservationIgnored private var lent: BackgroundTaskBox?
+    @ObservationIgnored private var heartbeat: Task<Void, Never>?
+
+    /// For `AmgiRoot.bootstrap`: the overnight work has to be known to iOS
+    /// before launch ends.
+    public static func registerBackgroundWork() {
+        CardVoiceBackground.register()
+    }
+
+    /// iOS's time overnight, on the charger (`CardVoiceBackground`): new
+    /// cards found, then the queue worked through, until it's done, Google's
+    /// limit is reached, or iOS wants the time back.
+    func workOvernight(_ box: BackgroundTaskBox) async {
+        box.task.expirationHandler = CardVoiceBackground.stopping()
+        CardVoiceLog.shared.add("Working in the background while the iPhone charges")
+        if !isWorking {
+            await queueNewCards()
+            resumeQueue()
+        }
+        await work?.value
+        box.task.setTaskCompleted(success: true)
+        if ReviewPreferences.aiVoiceAutoPrepare || !queue.isEmpty {
+            CardVoiceBackground.scheduleOvernight()
+        }
+    }
+
+    /// iOS 26 lets work started in Amgi carry on once it's left, with its
+    /// progress shown by the system, as long as it keeps moving.
+    private func carryOnWhenLeft(total: Int) {
+        guard #available(iOS 26.0, *), UIApplication.shared.applicationState == .active else { return }
+        CardVoiceBackground.submitContinued(cards: total)
+    }
+
+    /// iOS has started the work's time in the background.
+    func continuedStarted(_ box: BackgroundTaskBox) {
+        guard isWorking else {
+            box.task.setTaskCompleted(success: true)
+            return
+        }
+        lent = box
+        box.task.expirationHandler = CardVoiceBackground.stopping()
+        heartbeat?.cancel()
+        heartbeat = Task { [weak self] in
+            // Progress at least every few seconds, as iOS ends work it
+            // sees standing still: a card's share once it's done, and a
+            // little in between while Gemini records.
+            var lastDone = -1
+            var ticks: Int64 = 0
+            while !Task.isCancelled, let self, let lent = self.lent {
+                if case .preparing(let done, let total) = self.phase {
+                    ticks = done == lastDone ? min(ticks + 1, 99) : 0
+                    lastDone = done
+                    CardVoiceBackground.report(lent, done: done, of: total, ticks: ticks)
+                }
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+
+    /// The work is over: iOS's time is handed back.
+    private func endBackgroundTime() {
+        heartbeat?.cancel()
+        heartbeat = nil
+        lent?.task.setTaskCompleted(success: true)
+        lent = nil
+    }
 
     /// Starts again on the cards queued, with the screen kept on. Past
     /// Google's daily limit too, as it may have been raised (billing
@@ -456,6 +606,7 @@ public final class CardVoicePreparation {
         settle(.preparing(done: 0, of: total))
         // A locked phone would pause the work.
         if keepingScreenOn { ScreenAwake.keep(.preparing) }
+        carryOnWhenLeft(total: total)
         let together = ReviewPreferences.aiVoiceTogether
         work = Task {
             let ending: Phase
@@ -472,6 +623,7 @@ public final class CardVoicePreparation {
             ScreenAwake.keep(.preparing, false)
             isStopping = false
             settle(ending)
+            endBackgroundTime()
             // Made ready one by one meanwhile: counted again, to be sure.
             countAgain()
         }
@@ -648,6 +800,10 @@ public final class CardVoicePreparation {
 
             if outcomes.contains(.notDone) {
                 // The cards not done stay first in line.
+                if case .notInBackground? = recorder.lastError as? SpokenCheck.Failure {
+                    CardVoiceLog.shared.add("Waiting for Amgi to be open to check the recordings: \(queue.count) cards still queued", .waiting)
+                    return .waiting(queued: queue.count, why: .needsAmgiOpen)
+                }
                 if Task.isCancelled {
                     CardVoiceLog.shared.add("Stopped, with \(queue.count) cards still queued")
                     return .waiting(queued: queue.count, why: .stopped)
@@ -909,6 +1065,108 @@ public final class CardVoiceTogetherTest {
 
     private func stopped() {
         phase = groups.isEmpty ? .failed("Stopped.") : .finished
+    }
+}
+
+/// A background task iOS lends, to hand between threads: iOS says it's
+/// safe to use from any of them.
+final class BackgroundTaskBox: @unchecked Sendable {
+    let task: BGTask
+
+    init(_ task: BGTask) {
+        self.task = task
+    }
+}
+
+/// The AI voice's work while Amgi isn't on screen, by two means iOS has.
+///
+/// Overnight: a processing task iOS runs when it suits, usually with the
+/// iPhone charging and on a network, asked for whenever there's work. It
+/// finds new cards and works through the queue until iOS wants the time
+/// back.
+///
+/// On iOS 26, work started in Amgi carries on once it's left: a
+/// continued-processing task, whose progress iOS shows, and which it ends
+/// if it stops moving. Each run has an identifier of its own, under the
+/// bundle's, registered just before it's asked for, as Apple advises.
+enum CardVoiceBackground {
+    private static var bundle: String {
+        Bundle.main.bundleIdentifier ?? "com.amgiapp.AmgiApp"
+    }
+
+    static var overnightIdentifier: String { bundle + ".voice-overnight" }
+
+    /// At launch, before it ends, as iOS requires.
+    static func register() {
+        _ = BGTaskScheduler.shared.register(
+            forTaskWithIdentifier: overnightIdentifier,
+            using: nil,
+            launchHandler: overnightHandler()
+        )
+    }
+
+    /// Asks for time overnight: replaces any request already made.
+    static func scheduleOvernight() {
+        let request = BGProcessingTaskRequest(identifier: overnightIdentifier)
+        request.requiresNetworkConnectivity = true
+        request.requiresExternalPower = true
+        request.earliestBeginDate = Date(timeIntervalSinceNow: 15 * 60)
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            Log.review.error("Couldn't ask for time overnight: \(error.localizedDescription)")
+        }
+    }
+
+    @available(iOS 26.0, *)
+    static func submitContinued(cards: Int) {
+        let identifier = bundle + ".voice." + UUID().uuidString
+        guard BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: nil, launchHandler: continuedHandler()) else {
+            return
+        }
+        let request = BGContinuedProcessingTaskRequest(
+            identifier: identifier,
+            title: "Preparing the AI voice",
+            subtitle: "\(cards) \(cards == 1 ? "card" : "cards")"
+        )
+        // Now or not at all: the work runs anyway while Amgi is open.
+        request.strategy = .fail
+        do {
+            try BGTaskScheduler.shared.submit(request)
+        } catch {
+            Log.review.error("Couldn't carry on in the background: \(error.localizedDescription)")
+        }
+    }
+
+    /// How far the work has got, for iOS to show: a hundred units a card,
+    /// and `ticks` of the next while it's under way.
+    static func report(_ box: BackgroundTaskBox, done: Int, of total: Int, ticks: Int64) {
+        guard #available(iOS 26.0, *), let task = box.task as? BGContinuedProcessingTask else { return }
+        task.progress.totalUnitCount = Int64(max(total, 1)) * 100
+        task.progress.completedUnitCount = min(Int64(done) * 100 + ticks, task.progress.totalUnitCount)
+        task.updateTitle("Preparing the AI voice", subtitle: "\(done) of \(total) cards")
+    }
+
+    /// When iOS wants its time back: the work stops after the card under
+    /// way, and the rest stay queued.
+    nonisolated static func stopping() -> @Sendable () -> Void {
+        {
+            Task { @MainActor in CardVoicePreparation.shared.stop() }
+        }
+    }
+
+    nonisolated private static func overnightHandler() -> @Sendable (BGTask) -> Void {
+        { task in
+            let box = BackgroundTaskBox(task)
+            Task { @MainActor in await CardVoicePreparation.shared.workOvernight(box) }
+        }
+    }
+
+    nonisolated private static func continuedHandler() -> @Sendable (BGTask) -> Void {
+        { task in
+            let box = BackgroundTaskBox(task)
+            Task { @MainActor in CardVoicePreparation.shared.continuedStarted(box) }
+        }
     }
 }
 

@@ -11,6 +11,7 @@ import AnkiBackend
 import AnkiClients
 import Dependencies
 import Foundation
+import ReviewFeature
 import SyncFeature
 
 /// The app's dependency bootstrap. Called once from the host's `App.init`.
@@ -62,5 +63,11 @@ public enum AmgiRoot {
         } catch {
             startupError = error.localizedDescription
         }
+
+        #if canImport(UIKit)
+        // The AI voice's work overnight: iOS needs to know of it before
+        // launch ends.
+        CardVoicePreparation.registerBackgroundWork()
+        #endif
     }
 }

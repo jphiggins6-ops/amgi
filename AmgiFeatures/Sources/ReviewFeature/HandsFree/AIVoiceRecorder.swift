@@ -12,6 +12,7 @@ import MnemonicCore
 import ReviewCore
 #if canImport(UIKit)
 import Speech
+import UIKit
 #endif
 
 /// A card as the AI voice reads it: its sides as written, for Gemini to
@@ -503,6 +504,15 @@ extension AIVoiceRecorder {
         }
 
         var onTheirOwn = toRecord
+        if !stopped, toRecord.count > 1, SpokenCheck.isAvailable, !(await SpokenCheck.worksHere()) {
+            // In the background, where the pieces couldn't be checked:
+            // nothing is spent until Amgi is open.
+            let failure = SpokenCheck.Failure.notInBackground
+            problem = failure.localizedDescription
+            lastError = failure
+            log.add("Waiting for Amgi to be open: \(failure.localizedDescription)", .waiting)
+            stopped = true
+        }
         if !stopped, toRecord.count > 1 {
             if SpokenCheck.isAvailable {
                 // The lines that don't pass get one more recording together,
@@ -634,14 +644,31 @@ enum SpokenCheck {
     enum Failure: LocalizedError {
         case unavailable
         case tookTooLong
+        case notInBackground
 
         var errorDescription: String? {
             switch self {
             case .unavailable: "The iPhone’s speech recognition isn’t available to check the recording."
             case .tookTooLong: "Checking the recording took too long."
+            case .notInBackground: "The iPhone’s speech recognition, which checks each piece, doesn’t run while Amgi is in the background."
             }
         }
     }
+
+    /// Whether speech recognition works where Amgi is now: always while
+    /// it's open; in the background, found out once, on a recording made
+    /// already, before any request is spent on a recording that couldn't
+    /// be checked.
+    @MainActor static func worksHere() async -> Bool {
+        guard UIApplication.shared.applicationState != .active else { return true }
+        if let known = worksInBackground { return known }
+        guard let sample = CardVoiceRecordings.anyRecording() else { return true }
+        let heard = (try? await words(in: sample, hints: [])) ?? []
+        worksInBackground = !heard.isEmpty
+        return !heard.isEmpty
+    }
+
+    @MainActor private static var worksInBackground: Bool?
 
     private static let locale = Locale(identifier: "en-US")
 

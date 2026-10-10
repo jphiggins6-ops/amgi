@@ -67,6 +67,12 @@ public enum CardVoiceRecordings {
         try? FileManager.default.removeItem(at: testFolder)
     }
 
+    /// One of the recordings made, if there are any: the first found.
+    static func anyRecording() -> URL? {
+        let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+        return files.first { ["m4a", "wav"].contains($0.pathExtension) }
+    }
+
     /// Drops a recording that won't play, so it's made again.
     static func discard(_ file: URL) {
         try? FileManager.default.removeItem(at: file)
