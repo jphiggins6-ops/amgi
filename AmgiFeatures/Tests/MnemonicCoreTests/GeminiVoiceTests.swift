@@ -287,6 +287,25 @@ import Testing
         #expect(pieces.map { $0.problem == nil } == [true, true, false, false])
     }
 
+    @Test func aLineNotHeardIsLeftOutWithTheLinesEitherSide() {
+        let (sound, heard) = recording(standardParts(answer: []))
+        let pieces = RecordingSplitter.split(sound, lines: lines, heard: heard)
+        #expect(pieces[1].problem == "None of its words were heard.")
+        #expect(pieces.map { $0.problem == nil } == [false, false, false, true], "where its neighbours end can't be told")
+    }
+
+    @Test func aRecordingIsHeardAStretchAtATime() {
+        let (sound, _) = recording(standardParts())
+        let phrases = RecordingSplitter.phrases(in: sound)
+        let starts: [Double] = [0, 2.58, 3.98, 6.53]
+        // Split at the long pauses between lines, not the short one inside
+        // the first.
+        #expect(phrases.count == starts.count)
+        #expect(zip(phrases.map(\.start), starts).allSatisfy { abs($0 - $1) < 0.001 })
+        #expect(abs((phrases.last?.end ?? 0) - sound.duration) < 0.001)
+        #expect(abs(sound.clip(from: 2.58, to: 3.98).samples.count - 1_400) <= 1)
+    }
+
     @Test func aRecordingSurvivesTheTripThroughAWAVFile() {
         let sound = RecordingSplitter.Sound(samples: [0, 1, -1, 32_767, -32_768, 1_234], sampleRate: 24_000)
         #expect(RecordingSplitter.Sound(wav: sound.wav) == sound)

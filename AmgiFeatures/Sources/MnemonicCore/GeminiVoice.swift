@@ -243,8 +243,9 @@ public enum GeminiSpeech {
     }
 
     /// Several lines in one recording, to be cut apart (`RecordingSplitter`):
-    /// the same voice and style, with a pause after each line to cut at.
-    public static let togetherStyle = style + ", pausing for a moment after each paragraph"
+    /// the same voice and style, with a long pause after each line to cut
+    /// at, longer than any pause inside a line, so it can't be mistaken.
+    public static let togetherStyle = style + ", with a pause of about two seconds after each paragraph"
 
     /// The most text read in one recording of several lines: about a
     /// minute and a half of speech, which Gemini reads as evenly as a
@@ -426,6 +427,14 @@ public enum RecordingSplitter {
             Double(samples.count) / Double(sampleRate)
         }
 
+        /// The sound from `start` to `end`, in seconds.
+        public func clip(from start: Double, to end: Double) -> Sound {
+            let rate = Double(sampleRate)
+            let first = min(max(Int(start * rate), 0), samples.count)
+            let last = min(max(Int(end * rate), first), samples.count)
+            return Sound(samples: Array(samples[first..<last]), sampleRate: sampleRate)
+        }
+
         /// As a WAV file.
         public var wav: Data {
             var bytes: [UInt8] = []
@@ -454,6 +463,33 @@ public enum RecordingSplitter {
             return nil
         }
     }
+
+    /// A stretch of a recording, in seconds.
+    public struct Phrase: Equatable, Sendable {
+        public let start: Double
+        public let end: Double
+    }
+
+    /// The recording in stretches of speech, split at its longer pauses,
+    /// for speech recognition to hear one at a time (`HeardWord`s' times
+    /// then offset by each one's start). Given a long recording whole, it
+    /// can lose what came before a long pause, and with it most of the
+    /// lines.
+    public static func phrases(in sound: Sound) -> [Phrase] {
+        let frame = Double(frameSize(sound)) / Double(sound.sampleRate)
+        let levels = loudness(of: sound)
+        guard let loudest = levels.max(), loudest > 0 else { return [] }
+        let quiet = max(loudest * 0.03, 40)
+        // The pauses between stretches of speech, not those at either end.
+        let breaks = gaps(in: levels, below: quiet, frame: frame)
+            .filter { $0.length >= phraseBreak && $0.start > frame / 2 && $0.end < sound.duration - frame / 2 }
+            .map(\.middle)
+        let bounds = [0] + breaks + [sound.duration]
+        return zip(bounds, bounds.dropFirst()).map { Phrase(start: $0, end: $1) }
+    }
+
+    /// The shortest pause a recording is split into phrases at.
+    static let phraseBreak = 0.45
 
     /// Each of `lines`, read one after another in `sound`, cut out of it.
     public static func split(_ sound: Sound, lines: [String], heard: [HeardWord]) -> [Piece] {
@@ -491,28 +527,44 @@ public enum RecordingSplitter {
         }
 
         // Each cut, in the longest pause between one line's last word and
-        // the next line's first.
+        // the next line's first, and why not, where there's none.
         var cuts = [Double?](repeating: nil, count: lines.count - 1)
+        var whyNot = [String?](repeating: nil, count: lines.count - 1)
         for boundary in cuts.indices {
-            guard let end = lastHeard[boundary], let start = firstHeard[boundary + 1], end <= start + slack else {
+            guard let end = lastHeard[boundary], let start = firstHeard[boundary + 1] else {
+                whyNot[boundary] = "A line next to it wasn’t heard, so where it starts or ends couldn’t be told."
+                continue
+            }
+            guard end <= start + slack else {
+                whyNot[boundary] = "Its words and the next line’s seemed to overlap."
                 continue
             }
             let between = pauses.filter { $0.middle >= end - slack && $0.middle <= start + slack && $0.length >= minimumPause }
             cuts[boundary] = between.max { $0.length < $1.length }?.middle
+            if cuts[boundary] == nil {
+                whyNot[boundary] = "There was no pause between it and the line next to it."
+            }
         }
         // Out of order, they can't both be right.
         for boundary in cuts.indices.dropLast() {
             if let cut = cuts[boundary], let next = cuts[boundary + 1], next <= cut {
                 cuts[boundary] = nil
                 cuts[boundary + 1] = nil
+                whyNot[boundary] = "Its words were heard out of order."
+                whyNot[boundary + 1] = "Its words were heard out of order."
             }
         }
 
         return lines.indices.map { (index: Int) -> Piece in
+            guard firstHeard[index] != nil else {
+                return .failed("None of its words were heard.")
+            }
             let from = index == 0 ? 0 : cuts[index - 1]
             let to = index == lines.count - 1 ? sound.duration : cuts[index]
             guard let from, let to, from < to else {
-                return .failed("The pause before or after it couldn’t be found.")
+                let before = index > 0 ? whyNot[index - 1] : nil
+                let after = index < lines.count - 1 ? whyNot[index] : nil
+                return .failed(before ?? after ?? "The pause before or after it couldn’t be found.")
             }
             let said = tokens
                 .filter { (($0.start + $0.end) / 2) >= from && (($0.start + $0.end) / 2) < to }

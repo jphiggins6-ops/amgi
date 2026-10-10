@@ -570,18 +570,23 @@ extension AIVoiceRecorder {
         CardVoiceLog.shared.countRecording()
         var outcome = TogetherOutcome()
         outcome.seconds = Date().timeIntervalSince(began)
-        let file = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).wav")
-        try wav.write(to: file)
-        defer { try? FileManager.default.removeItem(at: file) }
-        let heard = try await SpokenCheck.words(in: file, hints: lines)
         // A minute or so of sound to go through: off the main thread.
-        let cutApart = await Task.detached { () -> [RecordingSplitter.Piece]? in
+        let decoded = await Task.detached { () -> (sound: RecordingSplitter.Sound, phrases: [SpokenCheck.Phrase])? in
             guard let sound = RecordingSplitter.Sound(wav: wav) else { return nil }
-            return RecordingSplitter.split(sound, lines: lines, heard: heard)
+            let phrases = RecordingSplitter.phrases(in: sound).map { phrase in
+                SpokenCheck.Phrase(start: phrase.start, wav: sound.clip(from: phrase.start, to: phrase.end).wav)
+            }
+            return (sound: sound, phrases: phrases)
         }.value
-        guard let pieces = cutApart else {
+        guard let decoded else {
             throw CardVoiceError.service("Gemini’s recording couldn’t be read to cut it apart.")
         }
+        let heard = try await SpokenCheck.words(in: decoded.phrases, hints: lines)
+        CardVoiceLog.shared.add("Heard \(heard.count) words in \(decoded.phrases.count) stretches of speech, for \(lines.count) lines")
+        let sound = decoded.sound
+        let pieces = await Task.detached {
+            RecordingSplitter.split(sound, lines: lines, heard: heard)
+        }.value
         for (line, piece) in zip(lines, pieces) {
             if let cut = piece.sound {
                 outcome.saved[line] = try CardVoiceRecordings.save(wav: cut.wav, of: line, voice: voice, in: place)
@@ -641,6 +646,43 @@ enum SpokenCheck {
             SFSpeechRecognizer.requestAuthorization(resuming(continuation))
         }
         return status == .authorized
+    }
+
+    /// A stretch of a recording (`RecordingSplitter.phrases`) as a WAV
+    /// file, and where it starts in the recording, in seconds.
+    struct Phrase: Sendable {
+        let start: Double
+        let wav: Data
+    }
+
+    /// The words heard in a recording, and when each was said, heard a
+    /// stretch at a time: given a long recording whole, speech recognition
+    /// can lose what came before a long pause. A stretch where nothing is
+    /// heard adds no words.
+    static func words(in phrases: [Phrase], hints: [String]) async throws -> [RecordingSplitter.HeardWord] {
+        var heard: [RecordingSplitter.HeardWord] = []
+        for phrase in phrases {
+            let file = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).wav")
+            try phrase.wav.write(to: file)
+            defer { try? FileManager.default.removeItem(at: file) }
+            do {
+                for word in try await words(in: file, hints: hints) {
+                    heard.append(RecordingSplitter.HeardWord(
+                        text: word.text,
+                        start: word.start + phrase.start,
+                        end: word.end + phrase.start
+                    ))
+                }
+            } catch let failure as Failure {
+                throw failure
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                // Nothing heard in it: its lines fail the check.
+                continue
+            }
+        }
+        return heard
     }
 
     /// The words heard in `file`, and when each was said. `hints`, the
