@@ -456,8 +456,14 @@ public final class CardVoicePreparation {
         settle(.preparing(done: 0, of: total))
         // A locked phone would pause the work.
         if keepingScreenOn { ScreenAwake.keep(.preparing) }
+        let together = ReviewPreferences.aiVoiceTogether.cards
         work = Task {
-            let ending = await workThroughQueue(plan: plan, total: total)
+            let ending: Phase
+            if together > 0 {
+                ending = await workThroughQueue(plan: plan, total: total, cardsTogether: together)
+            } else {
+                ending = await workThroughQueue(plan: plan, total: total)
+            }
             ScreenAwake.keep(.preparing, false)
             isStopping = false
             settle(ending)
@@ -548,12 +554,356 @@ public final class CardVoicePreparation {
             }
             phase = .preparing(done: done, of: total)
         }
+        return finished(done: done, failed: failed)
+    }
+
+    private func finished(done: Int, failed: Int) -> Phase {
         if failed > 0 {
             CardVoiceLog.shared.add("Queue done: \(done) ready, \(failed) couldn’t be done", .done)
             return .finished("Done: \(done) cards have the AI voice; \(failed) couldn’t be done and are left to the iPhone voice. \(recorder.problem ?? "")")
         }
         CardVoiceLog.shared.add("Queue done: \(done) cards ready", .done)
         return .finished("Done: \(done) cards have the AI voice.")
+    }
+
+    /// A few cards at a time (Settings → Review → AI Voice → Record), their
+    /// lines read together in one recording and cut apart, so Google's
+    /// daily limit, which counts requests, goes further. Cards leave the
+    /// queue once done, or once they can't be.
+    private func workThroughQueue(plan: Plan, total: Int, cardsTogether: Int) async -> Phase {
+        let sides = CardVoiceSides()
+        var done = 0
+        var failed = 0
+        var failuresInARow = 0
+        while !queue.isEmpty {
+            // Hands-free makes its own cards ready meanwhile.
+            while handsFreeIsOn, !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+            }
+            if Task.isCancelled {
+                CardVoiceLog.shared.add("Stopped, with \(queue.count) cards still queued")
+                return .waiting(queued: queue.count, why: .stopped)
+            }
+            if let wait = Self.dailyLimitWait {
+                CardVoiceLog.shared.add("Waiting for Google’s daily limit to pass: \(queue.count) cards still queued", .waiting)
+                return .waiting(queued: queue.count, why: wait)
+            }
+
+            // The next few cards still to do, up to about a minute and a
+            // half of speech.
+            var group: [(id: CardID, card: VoiceCard)] = []
+            var characters = 0
+            for cardId in queue {
+                guard group.count < cardsTogether else { break }
+                // Gone, no words to read, or done already: nothing to do.
+                guard let html = await sides.sides(of: cardId) else {
+                    queue.removeAll { $0 == cardId }
+                    continue
+                }
+                let card = VoiceCard(front: html.front, back: html.back, deckName: "")
+                if card.written.question.isEmpty || recorder.isReady(card, voice: plan.voice, rewrites: plan.rewrites) {
+                    queue.removeAll { $0 == cardId }
+                    done += 1
+                    continue
+                }
+                let size = card.question.count + card.answer.count
+                if !group.isEmpty, characters + size > GeminiSpeech.maxTogether { break }
+                group.append((id: cardId, card: card))
+                characters += size
+            }
+            phase = .preparing(done: done, of: total)
+            guard !group.isEmpty else { continue }
+
+            let cards = group.map { $0.card }
+            var outcomes = await recorder.make(cards, voice: plan.voice, rewrites: plan.rewrites)
+            // Google asked for a pause: wait out the minute, then try the
+            // rest again.
+            var waits = 0
+            while outcomes.contains(.notDone), waits < 5, let pause = AIVoiceRecorder.pause, !pause.daily, !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(max(1, pause.until.timeIntervalSinceNow)))
+                outcomes = await recorder.make(cards, voice: plan.voice, rewrites: plan.rewrites)
+                waits += 1
+            }
+
+            for (entry, outcome) in zip(group, outcomes) {
+                switch outcome {
+                case .ready:
+                    queue.removeAll { $0 == entry.id }
+                    done += 1
+                    failuresInARow = 0
+                case .failed:
+                    queue.removeAll { $0 == entry.id }
+                    failed += 1
+                    failuresInARow += 1
+                case .notDone:
+                    break
+                }
+            }
+            phase = .preparing(done: done, of: total)
+
+            if outcomes.contains(.notDone) {
+                // The cards not done stay first in line.
+                if Task.isCancelled {
+                    CardVoiceLog.shared.add("Stopped, with \(queue.count) cards still queued")
+                    return .waiting(queued: queue.count, why: .stopped)
+                }
+                if let wait = Self.dailyLimitWait {
+                    CardVoiceLog.shared.add("Waiting for Google’s daily limit to pass: \(queue.count) cards still queued", .waiting)
+                    return .waiting(queued: queue.count, why: wait)
+                }
+                if recorder.lastError is URLError {
+                    CardVoiceLog.shared.add("The connection dropped: \(queue.count) cards still queued", .waiting)
+                    return .waiting(queued: queue.count, why: .noConnection)
+                }
+                if case .noKey? = recorder.lastError as? CardVoiceError {
+                    return .waiting(queued: queue.count, why: .noKey)
+                }
+                return .waiting(queued: queue.count, why: .problems(recorder.problem ?? ""))
+            }
+            if failuresInARow >= 3 {
+                CardVoiceLog.shared.add("Stopped after three cards in a row couldn’t be done", .problem)
+                return .waiting(queued: queue.count, why: .problems(recorder.problem ?? ""))
+            }
+        }
+        return finished(done: done, failed: failed)
+    }
+}
+
+/// Settings → Review → AI Voice → Test Recording Together: ten cards due
+/// soon, five read in one recording and five with both sides in one
+/// recording each, cut apart and checked like Prepare Cards does, but kept
+/// apart from the AI voice's own recordings, to hear beside the ones made
+/// a side at a time before choosing how Prepare Cards records. Six
+/// recordings in all, of Google's daily hundred or so.
+@MainActor
+@Observable
+public final class CardVoiceTogetherTest {
+    public static let shared = CardVoiceTogetherTest()
+
+    public enum Phase: Equatable, Sendable {
+        case idle
+        case running(String)
+        case finished
+        case failed(String)
+    }
+
+    /// One side of a card, as it came out.
+    public struct Line: Identifiable, Equatable, Sendable {
+        public let id: Int
+        /// "Question" or "Answer".
+        public let side: String
+        public let text: String
+        /// Its piece of the recording made together, when it passed.
+        public let piece: URL?
+        /// Why it didn't.
+        public let problem: String?
+        /// The recording of it made on its own before, when there is one.
+        public let original: URL?
+    }
+
+    /// One recording of several lines.
+    public struct Group: Identifiable, Equatable, Sendable {
+        public let id: Int
+        public let title: String
+        public let lines: [Line]
+        /// How long Gemini took to record it, in seconds.
+        public let seconds: Double?
+        /// Why it couldn't be made, or checked, at all.
+        public let problem: String?
+    }
+
+    public private(set) var phase: Phase = .idle
+    public private(set) var groups: [Group] = []
+
+    /// Cards tried: the first half in one recording, the rest a card to a
+    /// recording.
+    public static let cardCount = 10
+    static let togetherCount = 5
+
+    /// The pieces that passed, of all the sides tried.
+    public var passed: Int { groups.flatMap(\.lines).filter { $0.piece != nil }.count }
+    public var total: Int { groups.flatMap(\.lines).count }
+    /// Recordings asked of Gemini, against a side at a time's `total`.
+    public var recordings: Int { groups.count }
+
+    public var isRunning: Bool {
+        switch phase {
+        case .running: true
+        case .idle, .finished, .failed: false
+        }
+    }
+
+    @ObservationIgnored private var work: Task<Void, Never>?
+
+    private init() {}
+
+    public func start() {
+        guard !isRunning else { return }
+        groups = []
+        phase = .running("Getting ready…")
+        let voice = ReviewPreferences.aiVoice.rawValue
+        let rewrites = ReviewPreferences.aiVoiceRewrites
+        work = Task {
+            ScreenAwake.keep(.testing)
+            await run(voice: voice, rewrites: rewrites)
+            ScreenAwake.keep(.testing, false)
+            work = nil
+        }
+    }
+
+    public func stop() {
+        work?.cancel()
+    }
+
+    /// Asks, the first time, to use the iPhone's speech recognition, which
+    /// checks each piece; whether it can.
+    public static func allowChecking() async -> Bool {
+        guard await SpokenCheck.requestPermission() else { return false }
+        return SpokenCheck.isAvailable
+    }
+
+    private func run(voice: String, rewrites: Bool) async {
+        let recorder = AIVoiceRecorder()
+        guard recorder.hasKey else {
+            phase = .failed(CardVoiceError.noKey.localizedDescription)
+            return
+        }
+        phase = .running("Asking to use speech recognition…")
+        guard await SpokenCheck.requestPermission(), SpokenCheck.isAvailable else {
+            phase = .failed("The test needs the iPhone’s own speech recognition to check each piece, and it isn’t allowed or isn’t on this iPhone. Allow it in the Settings app → Amgi → Speech Recognition.")
+            return
+        }
+        if AIVoiceRecorder.isPaused {
+            phase = .failed(AIVoiceRecorder.pause?.reason ?? "Google’s limit for the key is reached.")
+            return
+        }
+        CardVoiceRecordings.clearTestFolder()
+        CardVoiceLog.shared.add("Testing recording together: finding \(Self.cardCount) cards due soon")
+
+        phase = .running("Finding \(Self.cardCount) cards due soon…")
+        let cards = await cardsToTry(voice: voice, rewrites: rewrites, recorder: recorder)
+        guard cards.count >= 2 else {
+            phase = .failed("There aren’t enough cards with words to read.")
+            return
+        }
+
+        var scripted: [(card: VoiceCard, lines: CardScript.Lines)] = []
+        for card in cards {
+            guard !Task.isCancelled else { return stopped() }
+            phase = .running("Writing the scripts… \(scripted.count + 1) of \(cards.count)")
+            do {
+                let lines = try await recorder.script(for: card, rewrites: rewrites)
+                scripted.append((card: card, lines: lines))
+            } catch {
+                if AIVoiceRecorder.stops(error) {
+                    phase = .failed(error.localizedDescription)
+                    return
+                }
+            }
+        }
+
+        let together = Array(scripted.prefix(Self.togetherCount))
+        guard await record(together, title: "\(together.count) cards in one recording", recorder: recorder, voice: voice) else {
+            return
+        }
+        for (offset, entry) in scripted.dropFirst(Self.togetherCount).enumerated() {
+            guard !Task.isCancelled else { return stopped() }
+            let number = Self.togetherCount + offset + 1
+            guard await record([entry], title: "Card \(number): both sides in one recording", recorder: recorder, voice: voice) else {
+                return
+            }
+        }
+        phase = .finished
+        CardVoiceLog.shared.add("Testing recording together: \(passed) of \(total) sides passed the check, in \(recordings) recordings", .done)
+    }
+
+    /// Records the cards' sides together into the test's own folder, and
+    /// adds how it went; false when the test can't go on.
+    private func record(
+        _ entries: [(card: VoiceCard, lines: CardScript.Lines)],
+        title: String,
+        recorder: AIVoiceRecorder,
+        voice: String
+    ) async -> Bool {
+        var sides: [(side: String, text: String)] = []
+        var lines: [String] = []
+        for entry in entries {
+            for (side, text) in [("Question", entry.lines.question), ("Answer", entry.lines.answer)] where !text.isEmpty {
+                sides.append((side: side, text: text))
+                if !lines.contains(text) { lines.append(text) }
+            }
+        }
+        guard lines.count > 1 else { return true }
+        phase = .running("Recording \(title.prefix(1).lowercased() + title.dropFirst())…")
+        CardVoiceLog.shared.add("Testing recording together: \(title)")
+        do {
+            let outcome = try await recorder.recordTogether(lines, voice: voice, into: CardVoiceRecordings.testFolder)
+            groups.append(Group(
+                id: groups.count,
+                title: title,
+                lines: sides.enumerated().map { index, side in
+                    Line(
+                        id: index,
+                        side: side.side,
+                        text: side.text,
+                        piece: outcome.saved[side.text],
+                        problem: outcome.failed[side.text],
+                        original: CardVoiceRecordings.recording(of: side.text, voice: voice)
+                    )
+                },
+                seconds: outcome.seconds,
+                problem: nil
+            ))
+            return true
+        } catch {
+            groups.append(Group(
+                id: groups.count,
+                title: title,
+                lines: sides.enumerated().map { index, side in
+                    Line(
+                        id: index,
+                        side: side.side,
+                        text: side.text,
+                        piece: nil,
+                        problem: nil,
+                        original: CardVoiceRecordings.recording(of: side.text, voice: voice)
+                    )
+                },
+                seconds: nil,
+                problem: error.localizedDescription
+            ))
+            if AIVoiceRecorder.stops(error) || error is CancellationError {
+                phase = .failed(error.localizedDescription)
+                return false
+            }
+            return true
+        }
+    }
+
+    /// Cards due soonest, those already recorded a side at a time first,
+    /// so there's something to hear the pieces beside.
+    private func cardsToTry(voice: String, rewrites: Bool, recorder: AIVoiceRecorder) async -> [VoiceCard] {
+        let sides = CardVoiceSides()
+        let newPerDay = TodaySnapshotStore.read()?.newTotal ?? 20
+        guard let ids = try? await sides.cardIdsByDueDate(newPerDay: newPerDay, days: 7) else { return [] }
+        var recorded: [VoiceCard] = []
+        var others: [VoiceCard] = []
+        for cardId in ids.prefix(300) {
+            if Task.isCancelled || recorded.count >= Self.cardCount { break }
+            guard let html = await sides.sides(of: cardId) else { continue }
+            let card = VoiceCard(front: html.front, back: html.back, deckName: "")
+            guard !card.written.question.isEmpty else { continue }
+            if recorder.isReady(card, voice: voice, rewrites: rewrites) {
+                recorded.append(card)
+            } else if others.count < Self.cardCount {
+                others.append(card)
+            }
+        }
+        return Array((recorded + others).prefix(Self.cardCount))
+    }
+
+    private func stopped() {
+        phase = groups.isEmpty ? .failed("Stopped.") : .finished
     }
 }
 
@@ -565,6 +915,7 @@ enum ScreenAwake {
     enum Holder: Hashable {
         case handsFree
         case preparing
+        case testing
     }
 
     private static var holders: Set<Holder> = []

@@ -53,6 +53,7 @@ public enum ReviewPreferences {
         public static let aiVoiceSince = "review_pref_ai_voice_since"
         /// The cards queued for the AI voice, soonest due first, by id.
         public static let aiVoiceQueue = "review_pref_ai_voice_queue"
+        public static let aiVoiceTogether = "review_pref_ai_voice_together"
         public static let appIconBadge = "review_pref_app_icon_badge"
         public static let appIconTurnsGreen = "review_pref_app_icon_turns_green"
     }
@@ -108,6 +109,12 @@ public enum ReviewPreferences {
         UserDefaults.standard.object(forKey: Keys.aiVoiceRewrites) as? Bool ?? true
     }
 
+    /// How Prepare Cards records the AI voice: a side at a time unless
+    /// Settings says to record several together.
+    public static var aiVoiceTogether: AIVoiceTogether {
+        UserDefaults.standard.string(forKey: Keys.aiVoiceTogether).flatMap(AIVoiceTogether.init(rawValue:)) ?? .eachSide
+    }
+
     /// With `AIVoiceCards.added`, cards added from this moment on are read
     /// in the AI voice, and the deck that was there before keeps the
     /// iPhone's, which costs nothing. It's the first launch with the AI
@@ -161,6 +168,48 @@ public enum AIVoiceCards: String, CaseIterable, Identifiable, Sendable {
     case off
 
     public var id: String { rawValue }
+}
+
+/// How Prepare Cards records the AI voice. Google's daily limit counts
+/// requests, however much each one says, so several sides read in one
+/// recording, then cut apart and each checked by the phone's speech
+/// recognition, go further: about 100 cards a day with both sides of a
+/// card together, about 400 with five cards together, against 50 a side at
+/// a time.
+public enum AIVoiceTogether: String, CaseIterable, Identifiable, Sendable {
+    case eachSide = "side"
+    case bothSides = "card"
+    case fiveCards = "cards"
+
+    public var id: String { rawValue }
+
+    /// Cards in each recording; 0 for a side at a time.
+    public var cards: Int {
+        switch self {
+        case .eachSide: 0
+        case .bothSides: 1
+        case .fiveCards: 5
+        }
+    }
+
+    public var title: String {
+        switch self {
+        case .eachSide: "One side at a time"
+        case .bothSides: "Both sides together"
+        case .fiveCards: "5 cards together"
+        }
+    }
+
+    /// Roughly the cards a day that `limit` recordings make: a little
+    /// less than all the sides they hold, as a piece that doesn't pass the
+    /// check is recorded again on its own.
+    public func cardsADay(limit: Int) -> Int {
+        switch self {
+        case .eachSide: limit / 2
+        case .bothSides: limit * 9 / 10
+        case .fiveCards: limit * 4
+        }
+    }
 }
 
 /// The AI voice hands-free mode reads cards in: one of

@@ -10,6 +10,9 @@ import OSLog
 import AppCore
 import MnemonicCore
 import ReviewCore
+#if canImport(UIKit)
+import Speech
+#endif
 
 /// A card as the AI voice reads it: its sides as written, for Gemini to
 /// rewrite, and as the iPhone voice reads them, for when there's no script.
@@ -158,18 +161,9 @@ final class AIVoiceRecorder {
         let label = CardVoiceLog.quote(card.question)
         making[key] = Task {
             do {
-                var lines = self.lines(for: card, rewrites: rewrites)
-                if lines == nil {
-                    log.add("Writing the script for \(label)")
-                    let script = try await client.script(card.written)
-                    try CardVoiceRecordings.save(script, for: card.written)
-                    let checked = self.checked(script, card)
-                    scripts[CardVoiceRecordings.scriptFile(for: card.written)] = checked
-                    lines = checked
-                    log.add("Script written: \(CardVoiceLog.quote(checked.question))")
-                }
+                let lines = try await self.script(for: card, rewrites: rewrites)
                 // The question first: it's read first.
-                let sides = [("question", lines?.question ?? ""), ("answer", lines?.answer ?? "")]
+                let sides = [("question", lines.question), ("answer", lines.answer)]
                 for (side, text) in sides
                 where !text.isEmpty && CardVoiceRecordings.recording(of: text, voice: voice) == nil {
                     log.add("Recording the \(side) of \(label)")
@@ -197,6 +191,30 @@ final class AIVoiceRecorder {
                 Log.review.error("The AI voice couldn't do a card: \(error.localizedDescription)")
             }
             making[key] = nil
+        }
+    }
+
+    /// The card's script: written now, when there isn't one (with
+    /// `rewrites`), and kept.
+    func script(for card: VoiceCard, rewrites: Bool) async throws -> CardScript.Lines {
+        if let known = lines(for: card, rewrites: rewrites) { return known }
+        let log = CardVoiceLog.shared
+        log.add("Writing the script for \(CardVoiceLog.quote(card.question))")
+        let script = try await client.script(card.written)
+        try CardVoiceRecordings.save(script, for: card.written)
+        let checked = self.checked(script, card)
+        scripts[CardVoiceRecordings.scriptFile(for: card.written)] = checked
+        log.add("Script written: \(CardVoiceLog.quote(checked.question))")
+        return checked
+    }
+
+    /// Errors that hold up every card alike: Google's limit, no
+    /// connection, no key.
+    static func stops(_ error: any Error) -> Bool {
+        if error is URLError { return true }
+        switch error as? CardVoiceError {
+        case .limited?, .noKey?: return true
+        default: return false
         }
     }
 
@@ -422,3 +440,322 @@ public final class CardVoiceLog {
         try? JSONEncoder().encode(entries).write(to: file, options: .atomic)
     }
 }
+
+#if canImport(UIKit)
+// MARK: - Several lines in one recording
+
+/// What became of a card made ready along with others.
+enum CardOutcome: Equatable, Sendable {
+    case ready
+    /// It couldn't be done: its script, or a recording of it, failed.
+    case failed
+    /// Held up, by Google's limit, the connection or the lack of a key,
+    /// before it was done: it can be tried again.
+    case notDone
+}
+
+/// How lines recorded together came out.
+struct TogetherOutcome: Sendable {
+    /// Each line cut out cleanly, and where its recording was kept.
+    var saved: [String: URL] = [:]
+    /// Why each of the rest wasn't.
+    var failed: [String: String] = [:]
+    /// How long Gemini took to record them, in seconds.
+    var seconds: Double = 0
+}
+
+extension AIVoiceRecorder {
+    /// Makes several cards ready at once, for Prepare Cards: each one's
+    /// script, then the lines still to record, read together in one
+    /// recording and cut apart, when the phone can check the pieces
+    /// (`SpokenCheck`). A line whose piece doesn't pass the check, and
+    /// every line when the phone can't check, is recorded on its own, as
+    /// before. Stops at Google's limit or a dropped connection, leaving
+    /// the cards not yet done for later.
+    func make(_ cards: [VoiceCard], voice: String, rewrites: Bool) async -> [CardOutcome] {
+        let log = CardVoiceLog.shared
+        var outcomes = cards.map { isReady($0, voice: voice, rewrites: rewrites) ? CardOutcome.ready : .notDone }
+        let wasReady = outcomes.map { $0 == .ready }
+        if Self.isPaused {
+            problem = Self.pause?.reason
+            return outcomes
+        }
+        var stopped = false
+        var hadProblem = false
+
+        var toRecord: [String] = []
+        for index in cards.indices where outcomes[index] == .notDone {
+            do {
+                let lines = try await script(for: cards[index], rewrites: rewrites)
+                for line in [lines.question, lines.answer]
+                where !line.isEmpty && !toRecord.contains(line) && CardVoiceRecordings.recording(of: line, voice: voice) == nil {
+                    toRecord.append(line)
+                }
+            } catch {
+                note(error, at: CardVoiceLog.quote(cards[index].question))
+                hadProblem = true
+                if Self.stops(error) {
+                    stopped = true
+                    break
+                }
+                outcomes[index] = .failed
+            }
+        }
+
+        var onTheirOwn = toRecord
+        if !stopped, toRecord.count > 1 {
+            if SpokenCheck.isAvailable {
+                log.add("Recording \(toRecord.count) lines together, for \(cards.count) \(cards.count == 1 ? "card" : "cards")")
+                do {
+                    let outcome = try await recordTogether(toRecord, voice: voice)
+                    onTheirOwn = toRecord.filter { outcome.saved[$0] == nil }
+                    let cut = toRecord.count - onTheirOwn.count
+                    log.add("Cut apart: \(cut) of \(toRecord.count) lines passed the check", cut == toRecord.count ? .done : .step)
+                    for line in onTheirOwn {
+                        log.add("Left out \(CardVoiceLog.quote(line)): \(outcome.failed[line] ?? "")")
+                    }
+                } catch {
+                    note(error, at: "the lines recorded together")
+                    if Self.stops(error) {
+                        stopped = true
+                    }
+                }
+            } else {
+                log.add("The iPhone’s speech recognition isn’t allowed or isn’t on the phone, so each side is recorded on its own", .waiting)
+            }
+        }
+        if !stopped {
+            for line in onTheirOwn {
+                log.add("Recording on its own: \(CardVoiceLog.quote(line))")
+                do {
+                    let wav = try await client.record(line, voice)
+                    try CardVoiceRecordings.save(wav: wav, of: line, voice: voice)
+                    log.countRecording()
+                } catch {
+                    note(error, at: CardVoiceLog.quote(line))
+                    hadProblem = true
+                    if Self.stops(error) {
+                        stopped = true
+                        break
+                    }
+                }
+            }
+        }
+
+        for index in cards.indices where outcomes[index] == .notDone {
+            if isReady(cards[index], voice: voice, rewrites: rewrites) {
+                outcomes[index] = .ready
+            } else if !stopped {
+                outcomes[index] = .failed
+            }
+        }
+        for index in cards.indices where outcomes[index] == .ready && !wasReady[index] {
+            log.add("Ready: \(CardVoiceLog.quote(cards[index].question))", .done)
+            CardVoicePreparation.shared.cardVoiced(voice: voice, rewrites: rewrites)
+        }
+        if !hadProblem && !stopped {
+            problem = nil
+            lastError = nil
+        }
+        return outcomes
+    }
+
+    /// `lines` read together in one recording, cut apart and each piece
+    /// checked (`RecordingSplitter`), and the pieces that pass kept as a
+    /// recording each: in the AI voice's folder, or in `place`. Throws
+    /// when the recording can't be made, or can't be checked at all.
+    func recordTogether(_ lines: [String], voice: String, into place: URL? = nil) async throws -> TogetherOutcome {
+        let began = Date()
+        let wav = try await client.recordTogether(lines, voice)
+        CardVoiceLog.shared.countRecording()
+        var outcome = TogetherOutcome()
+        outcome.seconds = Date().timeIntervalSince(began)
+        let file = FileManager.default.temporaryDirectory.appending(path: "\(UUID().uuidString).wav")
+        try wav.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let heard = try await SpokenCheck.words(in: file, hints: lines)
+        // A minute or so of sound to go through: off the main thread.
+        let cutApart = await Task.detached { () -> [RecordingSplitter.Piece]? in
+            guard let sound = RecordingSplitter.Sound(wav: wav) else { return nil }
+            return RecordingSplitter.split(sound, lines: lines, heard: heard)
+        }.value
+        guard let pieces = cutApart else {
+            throw CardVoiceError.service("Gemini’s recording couldn’t be read to cut it apart.")
+        }
+        for (line, piece) in zip(lines, pieces) {
+            if let cut = piece.sound {
+                outcome.saved[line] = try CardVoiceRecordings.save(wav: cut.wav, of: line, voice: voice, in: place)
+            } else {
+                outcome.failed[line] = piece.problem ?? "It couldn’t be cut out."
+            }
+        }
+        return outcome
+    }
+
+    /// Keeps a card's problem, and holds new work back at Google's limit.
+    private func note(_ error: any Error, at label: String) {
+        problem = error.localizedDescription
+        lastError = error
+        Self.pauseIfLimited(error)
+        if case .limited? = error as? CardVoiceError {
+            CardVoiceLog.shared.add("Google’s limit, at \(label): \(error.localizedDescription)", .waiting)
+        } else {
+            CardVoiceLog.shared.add("Couldn’t do \(label): \(error.localizedDescription)", .problem)
+        }
+        Log.review.error("The AI voice couldn't do a card: \(error.localizedDescription)")
+    }
+}
+
+/// The phone's own speech recognition, run over a recording to hear which
+/// words it says and when, so that a recording of several lines can be
+/// cut apart and each piece checked (`RecordingSplitter`). On the phone
+/// only: nothing is sent anywhere.
+enum SpokenCheck {
+    enum Failure: LocalizedError {
+        case unavailable
+        case tookTooLong
+
+        var errorDescription: String? {
+            switch self {
+            case .unavailable: "The iPhone’s speech recognition isn’t available to check the recording."
+            case .tookTooLong: "Checking the recording took too long."
+            }
+        }
+    }
+
+    private static let locale = Locale(identifier: "en-US")
+
+    /// Whether recordings can be checked: speech recognition is allowed,
+    /// and works on the phone.
+    static var isAvailable: Bool {
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized,
+              let recognizer = SFSpeechRecognizer(locale: locale)
+        else { return false }
+        return recognizer.supportsOnDeviceRecognition
+    }
+
+    /// Asks, the first time, to use speech recognition.
+    static func requestPermission() async -> Bool {
+        if SFSpeechRecognizer.authorizationStatus() == .authorized { return true }
+        let status = await withCheckedContinuation { (continuation: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>) in
+            SFSpeechRecognizer.requestAuthorization(resuming(continuation))
+        }
+        return status == .authorized
+    }
+
+    /// The words heard in `file`, and when each was said. `hints`, the
+    /// lines it should say, help with words recognition doesn't know.
+    static func words(in file: URL, hints: [String]) async throws -> [RecordingSplitter.HeardWord] {
+        guard let recognizer = SFSpeechRecognizer(locale: locale),
+              recognizer.supportsOnDeviceRecognition,
+              recognizer.isAvailable
+        else { throw Failure.unavailable }
+        let request = SFSpeechURLRecognitionRequest(url: file)
+        request.requiresOnDeviceRecognition = true
+        request.shouldReportPartialResults = false
+        request.addsPunctuation = false
+        request.contextualStrings = unusualWords(in: hints)
+        let recognition = Recognition(recognizer)
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<[RecordingSplitter.HeardWord], any Error>) in
+                recognition.start(request, continuation)
+            }
+        } onCancel: {
+            recognition.stop(CancellationError())
+        }
+    }
+
+    /// The lines' longer words, which recognition is likelier to get
+    /// wrong: drug names and the like.
+    static func unusualWords(in lines: [String]) -> [String] {
+        var seen: Set<String> = []
+        var found: [String] = []
+        for word in lines.flatMap(RecordingSplitter.words) where word.count >= 6 && seen.insert(word).inserted {
+            found.append(word)
+        }
+        return Array(found.prefix(100))
+    }
+
+    private static func resuming(
+        _ continuation: CheckedContinuation<SFSpeechRecognizerAuthorizationStatus, Never>
+    ) -> @Sendable (SFSpeechRecognizerAuthorizationStatus) -> Void {
+        { status in continuation.resume(returning: status) }
+    }
+}
+
+/// One recognition of a file, from its start to its one answer, which
+/// comes on speech recognition's own thread.
+private final class Recognition: @unchecked Sendable {
+    private let lock = NSLock()
+    private let recognizer: SFSpeechRecognizer
+    private var task: SFSpeechRecognitionTask?
+    private var continuation: CheckedContinuation<[RecordingSplitter.HeardWord], any Error>?
+    private var stopped = false
+
+    init(_ recognizer: SFSpeechRecognizer) {
+        self.recognizer = recognizer
+    }
+
+    func start(
+        _ request: SFSpeechURLRecognitionRequest,
+        _ continuation: CheckedContinuation<[RecordingSplitter.HeardWord], any Error>
+    ) {
+        let goes = lock.withLock { () -> Bool in
+            guard !stopped else { return false }
+            self.continuation = continuation
+            return true
+        }
+        guard goes else {
+            continuation.resume(throwing: CancellationError())
+            return
+        }
+        let task = recognizer.recognitionTask(with: request, resultHandler: Self.handler(self))
+        lock.withLock { self.task = task }
+        Self.timeOut(self)
+    }
+
+    func stop(_ error: any Error) {
+        let task = lock.withLock { () -> SFSpeechRecognitionTask? in
+            stopped = true
+            return self.task
+        }
+        task?.cancel()
+        finish(.failure(error))
+    }
+
+    func finish(_ result: Result<[RecordingSplitter.HeardWord], any Error>) {
+        let waiting = lock.withLock { () -> CheckedContinuation<[RecordingSplitter.HeardWord], any Error>? in
+            let waiting = continuation
+            continuation = nil
+            return waiting
+        }
+        waiting?.resume(with: result)
+    }
+
+    private static func handler(_ recognition: Recognition) -> @Sendable (SFSpeechRecognitionResult?, (any Error)?) -> Void {
+        { result, error in
+            if let result, result.isFinal {
+                let words = result.bestTranscription.segments.map { segment in
+                    RecordingSplitter.HeardWord(
+                        text: segment.substring,
+                        start: segment.timestamp,
+                        end: segment.timestamp + segment.duration
+                    )
+                }
+                recognition.finish(.success(words))
+            } else if let error {
+                recognition.finish(.failure(error))
+            }
+        }
+    }
+
+    /// A couple of minutes is far longer than a recording of a few cards
+    /// takes.
+    private static func timeOut(_ recognition: Recognition) {
+        Task {
+            try? await Task.sleep(for: .seconds(120))
+            recognition.stop(SpokenCheck.Failure.tookTooLong)
+        }
+    }
+}
+#endif

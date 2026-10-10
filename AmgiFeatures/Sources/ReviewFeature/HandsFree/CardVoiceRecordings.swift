@@ -21,30 +21,50 @@ public enum CardVoiceRecordings {
 
     // MARK: - Recordings
 
-    /// The recording of `text` in `voice`, when there is one.
-    static func recording(of text: String, voice: String) -> URL? {
+    /// The recording of `text` in `voice`, when there is one: in the AI
+    /// voice's folder, or in `place`.
+    static func recording(of text: String, voice: String, in place: URL? = nil) -> URL? {
         let name = hash(GeminiSpeech.model, GeminiSpeech.style, voice, text)
+        let directory = place ?? folder
         return ["m4a", "wav"]
-            .map { folder.appending(path: "\(name).\($0)") }
+            .map { directory.appending(path: "\(name).\($0)") }
             .first(where: exists)
     }
 
     /// Keeps Gemini's WAV recording of `text` as AAC, a tenth of the size,
-    /// or as the WAV itself when that can't be made.
+    /// or as the WAV itself when that can't be made: in the AI voice's
+    /// folder, or in `place`.
     @discardableResult
-    static func save(wav: Data, of text: String, voice: String) throws -> URL {
-        try makeFolder()
+    static func save(wav: Data, of text: String, voice: String, in place: URL? = nil) throws -> URL {
+        let directory: URL
+        if let place {
+            try FileManager.default.createDirectory(at: place, withIntermediateDirectories: true)
+            directory = place
+        } else {
+            try makeFolder()
+            directory = folder
+        }
         let name = hash(GeminiSpeech.model, GeminiSpeech.style, voice, text)
-        let compressed = folder.appending(path: "\(name).m4a")
+        let compressed = directory.appending(path: "\(name).m4a")
         do {
             try writeAAC(fromWAV: wav, to: compressed)
             return compressed
         } catch {
             try? FileManager.default.removeItem(at: compressed)
-            let file = folder.appending(path: "\(name).wav")
+            let file = directory.appending(path: "\(name).wav")
             try wav.write(to: file, options: .atomic)
             return file
         }
+    }
+
+    /// Where the test of recording several cards together keeps what it
+    /// makes, apart from the AI voice's own recordings.
+    static var testFolder: URL {
+        URL.cachesDirectory.appending(path: "CardVoiceTest", directoryHint: .isDirectory)
+    }
+
+    static func clearTestFolder() {
+        try? FileManager.default.removeItem(at: testFolder)
     }
 
     /// Drops a recording that won't play, so it's made again.

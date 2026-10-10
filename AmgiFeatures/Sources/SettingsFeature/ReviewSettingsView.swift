@@ -65,6 +65,9 @@ struct ReviewSettingsView: View {
     @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceRewrites))
     private var aiVoiceRewrites: Bool = true
 
+    @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceTogether))
+    private var aiVoiceTogether: String = AIVoiceTogether.eachSide.rawValue
+
     /// The saved Gemini key's kind, nil when there's none.
     @State private var geminiKeyKind = GeminiAPIKey.load().map(GeminiAPIKey.kind(of:))
     @State private var editsGeminiKey = false
@@ -292,6 +295,23 @@ struct ReviewSettingsView: View {
                 )
                 .disabled(aiVoiceIsOff)
                 SettingsSeparator()
+                SettingsPickerRow(
+                    title: "Record",
+                    systemImage: "square.stack.3d.up",
+                    tone: .info,
+                    selection: Binding($aiVoiceTogether)
+                ) {
+                    ForEach(AIVoiceTogether.allCases) { mode in
+                        Text(verbatim: mode.title).tag(mode.rawValue)
+                    }
+                }
+                .disabled(aiVoiceIsOff)
+                SettingsSeparator()
+                SettingsRowLink(title: "Test Recording Together", systemImage: "waveform.badge.magnifyingglass", tone: .info) {
+                    AIVoiceTogetherTestView()
+                }
+                .disabled(aiVoiceIsOff)
+                SettingsSeparator()
                 SettingsButtonRow(
                     title: "Hear the AI Voice",
                     systemImage: "play.circle",
@@ -357,6 +377,11 @@ struct ReviewSettingsView: View {
             }) {
                 GeminiKeySheet()
             }
+            .onChange(of: aiVoiceTogether) { _, chosen in
+                // Each piece is checked by the iPhone's speech recognition.
+                guard chosen != AIVoiceTogether.eachSide.rawValue else { return }
+                Task { _ = await CardVoiceTogetherTest.allowChecking() }
+            }
             .onChange(of: preparation.phase) { _, phase in
                 switch phase {
                 case .choosing:
@@ -400,7 +425,7 @@ struct ReviewSettingsView: View {
             if let daysLeftNote {
                 SettingsFootnote(daysLeftNote)
             }
-            SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or ahead of time with Prepare Cards, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Prepare Cards does the cards due soonest first, a batch at a time. Google lets the Gemini voice make about 100 recordings a day once billing is on for the key, roughly 50 cards, and only about 10 on its free tier; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it.")
+            SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or ahead of time with Prepare Cards, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Prepare Cards does the cards due soonest first, a batch at a time. Google lets the Gemini voice make about 100 recordings a day once billing is on for the key, and only about 10 on its free tier; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it. A side at a time, 100 recordings make about 50 cards. Record → Both sides together or 5 cards together reads several sides in one recording, which Google counts as one, then cuts it into a piece per side; the iPhone’s own speech recognition checks each piece says its line, and one that doesn’t is recorded again on its own. That makes about 100 or 400 cards a day, for the same price. Test Recording Together tries it on ten cards first, to hear beside the ones made a side at a time.")
         }
     }
 
@@ -472,15 +497,21 @@ struct ReviewSettingsView: View {
     }
 
     /// Roughly how long the cards still to do take at the key's daily
-    /// limit, once Google has said what it is: two recordings a card.
+    /// limit, once Google has said what it is, recorded as Record says.
     private var daysLeftNote: String? {
         guard !aiVoiceIsOff,
               let tally = preparation.currentTally, tally.remaining > 0,
               let limit = CardVoiceLog.shared.dailyLimit, limit >= 2
         else { return nil }
-        let perDay = limit / 2
+        let mode = AIVoiceTogether(rawValue: aiVoiceTogether) ?? .eachSide
+        let perDay = max(mode.cardsADay(limit: limit), 1)
         let days = (tally.remaining + perDay - 1) / perDay
-        return "At this key’s limit of \(limit) recordings a day, two for each card, about \(perDay) cards are done a day: roughly \(days) \(days == 1 ? "day" : "days") for the \(tally.remaining) still to do."
+        let how = switch mode {
+        case .eachSide: "two for each card"
+        case .bothSides: "one for each card"
+        case .fiveCards: "one for up to five cards"
+        }
+        return "At this key’s limit of \(limit) recordings a day, \(how), about \(perDay) cards are done a day: roughly \(days) \(days == 1 ? "day" : "days") for the \(tally.remaining) still to do."
     }
 
     /// "37", or "37 of 100" once Google has said what the key's limit is.
@@ -532,7 +563,8 @@ struct ReviewSettingsView: View {
     private var preparationMessage: String {
         guard case .choosing(_, let ready) = preparation.phase else { return "" }
         let readyAlready = ready > 0 ? "\(ready) cards are ready already. " : ""
-        return "\(readyAlready)They’re done soonest due first: what’s due now, then each day’s reviews and new cards, so the cards you’ll see next are ready first. Google lets the Gemini voice do about 50 cards a day once billing is on for the key, about 5 on its free tier; a bigger batch carries on by itself each day Amgi is open, and waits while hands-free runs. Keep Amgi open while it works: the screen stays on."
+        let mode = AIVoiceTogether(rawValue: aiVoiceTogether) ?? .eachSide
+        return "\(readyAlready)They’re done soonest due first: what’s due now, then each day’s reviews and new cards, so the cards you’ll see next are ready first. Recording \(mode.title.lowercased()), Google lets the Gemini voice do about \(mode.cardsADay(limit: 100)) cards a day once billing is on for the key, about \(mode.cardsADay(limit: 10)) on its free tier; a bigger batch carries on by itself each day Amgi is open, and waits while hands-free runs. Keep Amgi open while it works: the screen stays on."
     }
 
     private var geminiKeyTitle: String {
@@ -703,6 +735,142 @@ private struct AIVoiceActivityView: View {
         case .done: palette.positive
         case .waiting: palette.warning
         case .problem: palette.danger
+        }
+    }
+}
+
+/// Settings → Review → AI Voice → Test Recording Together: ten cards
+/// recorded several sides to a recording and cut apart, each side to hear
+/// beside the one made on its own, then the choice of how Prepare Cards
+/// records.
+private struct AIVoiceTogetherTestView: View {
+    @Environment(\.palette) private var palette
+
+    @Shared(.appStorage(ReviewPreferences.Keys.aiVoiceTogether))
+    private var aiVoiceTogether: String = AIVoiceTogether.eachSide.rawValue
+
+    /// Made on the first tap of a play button.
+    @State private var player: HandsFreeVoicePreview?
+    /// The recording playing, so its button shows it.
+    @State private var playing: URL?
+    @State private var cantPlay = false
+
+    private var test: CardVoiceTogetherTest { .shared }
+
+    var body: some View {
+        List {
+            Section {
+                Text("Ten cards due soon are recorded the new way: five cards read in one recording, then five cards with both sides in one recording each. Each recording is cut into a piece per side, and the iPhone’s own speech recognition checks that every piece says its line. Listen to the pieces beside the recordings made a side at a time, then choose how Prepare Cards records. It uses 6 of Google’s daily recordings. The pieces are kept apart, and aren’t used in reviews.")
+                    .font(.callout)
+                    .foregroundStyle(palette.textSecondary)
+                if test.isRunning {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text(verbatim: runningStep)
+                            .font(.callout)
+                    }
+                    Button("Stop", role: .destructive) { test.stop() }
+                } else {
+                    Button(test.groups.isEmpty ? "Start the Test" : "Run the Test Again") { test.start() }
+                }
+                if case .failed(let reason) = test.phase {
+                    Text(verbatim: reason)
+                        .font(.callout)
+                        .foregroundStyle(palette.danger)
+                }
+            }
+            if test.total > 0 {
+                Section("Result") {
+                    LabeledContent("Sides that passed", value: "\(test.passed) of \(test.total)")
+                    LabeledContent("Recordings used", value: "\(test.recordings), against \(test.total) a side at a time")
+                }
+            }
+            ForEach(test.groups) { group in
+                Section {
+                    ForEach(group.lines) { line in
+                        lineRow(line)
+                    }
+                } header: {
+                    Text(verbatim: group.title)
+                } footer: {
+                    if let problem = group.problem {
+                        Text(verbatim: problem)
+                    } else if let seconds = group.seconds {
+                        Text(verbatim: "Gemini took \(Int(seconds.rounded())) seconds to record it.")
+                    }
+                }
+            }
+            if test.phase == .finished {
+                Section {
+                    Picker("Prepare Cards records", selection: Binding($aiVoiceTogether)) {
+                        ForEach(AIVoiceTogether.allCases) { mode in
+                            Text(verbatim: mode.title).tag(mode.rawValue)
+                        }
+                    }
+                } header: {
+                    Text("Use it?")
+                } footer: {
+                    Text("A piece that doesn’t pass the check is always recorded again on its own, so no card is left with a bad cut. Hands-free mode, making a card ready as it goes, records a side at a time either way.")
+                }
+            }
+        }
+        .navigationTitle("Test Recording Together")
+        .navigationBarTitleDisplayMode(.inline)
+        .alert("That recording couldn’t be played.", isPresented: $cantPlay) {
+            Button("OK", role: .cancel) {}
+        }
+        .onDisappear { player?.stop() }
+    }
+
+    private var runningStep: String {
+        if case .running(let step) = test.phase { return step }
+        return ""
+    }
+
+    private func lineRow(_ line: CardVoiceTogetherTest.Line) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(verbatim: line.side)
+                .font(.caption)
+                .foregroundStyle(palette.textTertiary)
+            Text(verbatim: line.text)
+                .font(.callout)
+                .foregroundStyle(palette.textPrimary)
+            HStack(spacing: 16) {
+                if let piece = line.piece {
+                    playButton("Together", piece)
+                } else {
+                    Label(line.problem ?? "Not recorded", systemImage: "xmark.circle")
+                        .font(.caption)
+                        .foregroundStyle(palette.danger)
+                }
+                if let original = line.original {
+                    playButton("On its own", original)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func playButton(_ title: String, _ recording: URL) -> some View {
+        Button {
+            play(recording)
+        } label: {
+            Label(title, systemImage: playing == recording ? "speaker.wave.2.fill" : "play.circle")
+                .font(.callout)
+        }
+        // In a list row, so each button plays its own.
+        .buttonStyle(.borderless)
+    }
+
+    private func play(_ recording: URL) {
+        let preview = player ?? HandsFreeVoicePreview()
+        player = preview
+        preview.stop()
+        playing = recording
+        Task {
+            let played = await preview.play(recording)
+            if playing == recording { playing = nil }
+            if !played { cantPlay = true }
         }
     }
 }

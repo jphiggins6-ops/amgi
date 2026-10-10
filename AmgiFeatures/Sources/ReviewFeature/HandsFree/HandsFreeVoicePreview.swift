@@ -5,7 +5,7 @@
 
 #if canImport(UIKit)
 import AVFoundation
-import Foundation
+public import Foundation
 import AppCore
 import MnemonicCore
 
@@ -46,6 +46,15 @@ public final class HandsFreeVoicePreview {
             return "That recording couldn't be played. Try again to make a new one."
         }
         return nil
+    }
+
+    /// A recording, such as one of the test of recording together's; false
+    /// when it can't be played.
+    public func play(_ recording: URL) async -> Bool {
+        begin()
+        let played = await speaker.play(recording)
+        end()
+        return played
     }
 
     public func stop() {

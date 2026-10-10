@@ -181,4 +181,123 @@ import Testing
         #expect(!CardScript.givesAwayAnswer(.init(question: "Which artery branches off the renal artery?", answer: "The renal."), card: alreadyThere),
                 "the word was in the question as written")
     }
+
+    // MARK: - Several lines in one recording
+
+    @Test func severalLinesAreReadAsParagraphsWithAPauseAsked() throws {
+        let request = try GeminiSpeech.makeRequest(lines: ["What's the drug of choice?", "Ethosuximide", "Line\none"], voice: "Kore", apiKey: "k")
+        let json = try body(of: request)
+        let contents = try #require(json["contents"] as? [[String: Any]])
+        let part = try #require((contents.first?["parts"] as? [[String: Any]])?.first)
+        #expect(part["text"] as? String == "What's the drug of choice?\n\nEthosuximide.\n\nLine one.")
+        #expect((part["speechMetadata"] as? [String: Any])?["style"] as? String == GeminiSpeech.togetherStyle)
+    }
+
+    private let lines = [
+        "What's the drug of choice for absence seizures?",
+        "Ethosuximide.",
+        "Which nerve supplies the deltoid?",
+        "The axillary nerve.",
+    ]
+
+    /// A recording at 1,000 samples a second: speech, as a loud tone, and
+    /// pauses, as silence, with the words heard spread over each stretch
+    /// of speech.
+    private func recording(_ parts: [(seconds: Double, heard: [String]?)]) -> (RecordingSplitter.Sound, [RecordingSplitter.HeardWord]) {
+        var samples: [Int16] = []
+        var heard: [RecordingSplitter.HeardWord] = []
+        var time = 0.0
+        for part in parts {
+            let count = Int((part.seconds * 1_000).rounded())
+            if let words = part.heard {
+                samples += (0..<count).map { (index: Int) -> Int16 in index % 2 == 0 ? 3_000 : -3_000 }
+                let each = part.seconds / Double(max(words.count, 1))
+                for (index, word) in words.enumerated() {
+                    heard.append(.init(text: word, start: time + Double(index) * each, end: time + Double(index + 1) * each))
+                }
+            } else {
+                samples += [Int16](repeating: 0, count: count)
+            }
+            time += part.seconds
+        }
+        return (RecordingSplitter.Sound(samples: samples, sampleRate: 1_000), heard)
+    }
+
+    private func standardParts(
+        answer: [String] = ["etho", "suck", "simide"],
+        pauseAfterAnswer: Double = 0.6,
+        last: [String] = ["the", "axillary", "nerve"]
+    ) -> [(seconds: Double, heard: [String]?)] {
+        [
+            (0.2, nil),
+            (0.8, ["what's", "the", "drug"]), (0.08, nil), (1.2, ["of", "choice", "for", "absence", "seizures"]),
+            (0.6, nil),
+            (0.8, answer),
+            (pauseAfterAnswer, nil),
+            (2.0, ["which", "nerve", "supplies", "the", "deltoid"]),
+            (0.5, nil),
+            (1.0, last),
+            (0.3, nil),
+        ]
+    }
+
+    /// A piece's start and end in the recording, in hundredths of a second.
+    private func span(_ piece: RecordingSplitter.Piece, in sound: RecordingSplitter.Sound) -> [Int]? {
+        guard let cut = piece.sound,
+              let start = (0...(sound.samples.count - cut.samples.count)).first(where: { offset in
+                  // The fades change the very ends; the middle is as it was.
+                  sound.samples[offset + 20..<offset + cut.samples.count - 20]
+                      .elementsEqual(cut.samples[20..<cut.samples.count - 20])
+              })
+        else { return nil }
+        return [start / 10, (start + cut.samples.count) / 10]
+    }
+
+    @Test func eachLineIsCutAtThePauseAfterIt() {
+        let (sound, heard) = recording(standardParts())
+        let pieces = RecordingSplitter.split(sound, lines: lines, heard: heard)
+        #expect(pieces.allSatisfy { $0.problem == nil })
+        // Each with its speech, a little quiet before and a little more
+        // after, but not the short pause inside the first line.
+        #expect(pieces.map { span($0, in: sound) } == [[5, 253], [273, 393], [413, 653], [663, 803]])
+    }
+
+    @Test func aPieceWhoseWordsDontMatchIsLeftOut() {
+        let (sound, heard) = recording(standardParts(last: ["banana", "bread", "pudding"]))
+        let pieces = RecordingSplitter.split(sound, lines: lines, heard: heard)
+        #expect(pieces.prefix(3).allSatisfy { $0.problem == nil })
+        #expect(pieces[3].problem?.hasPrefix("Its words didn’t match the line") == true)
+    }
+
+    @Test func linesRunTogetherWithoutAPauseAreLeftOut() {
+        let (sound, heard) = recording(standardParts(pauseAfterAnswer: 0))
+        let pieces = RecordingSplitter.split(sound, lines: lines, heard: heard)
+        #expect(pieces.map { $0.problem == nil } == [true, false, false, true])
+    }
+
+    @Test func aLineSaidTwiceIsLeftOut() {
+        let (sound, heard) = recording(standardParts(answer: ["ethosuximide", "ethosuximide"]))
+        let pieces = RecordingSplitter.split(sound, lines: lines, heard: heard)
+        #expect(pieces.map { $0.problem == nil } == [true, false, true, true])
+    }
+
+    @Test func aRecordingCutShortLeavesOutTheLinesItDoesntHave() {
+        let (sound, heard) = recording(Array(standardParts().dropLast(3)))
+        let pieces = RecordingSplitter.split(sound, lines: lines, heard: heard)
+        #expect(pieces.map { $0.problem == nil } == [true, true, false, false])
+    }
+
+    @Test func aRecordingSurvivesTheTripThroughAWAVFile() {
+        let sound = RecordingSplitter.Sound(samples: [0, 1, -1, 32_767, -32_768, 1_234], sampleRate: 24_000)
+        #expect(RecordingSplitter.Sound(wav: sound.wav) == sound)
+        #expect(RecordingSplitter.Sound(wav: Data("not a wav file".utf8)) == nil)
+    }
+
+    @Test func wordsHeardALittleWrongStillLineUp() {
+        // "simide" is the likest to "ethosuximide"; the rest were extra.
+        #expect(RecordingSplitter.align(["etho", "suck", "simide", "which"], to: ["ethosuximide", "which"]) == [nil, nil, 0, 1])
+        #expect(RecordingSplitter.similarity("ethosucksimide", "ethosuximide") > 0.7)
+        #expect(RecordingSplitter.similarity("", "") == 1)
+        #expect(RecordingSplitter.similarity("abc", "") == 0)
+    }
 }
