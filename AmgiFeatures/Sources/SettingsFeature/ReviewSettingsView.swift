@@ -425,7 +425,7 @@ struct ReviewSettingsView: View {
             if let daysLeftNote {
                 SettingsFootnote(daysLeftNote)
             }
-            SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or ahead of time with Prepare Cards, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Prepare Cards does the cards due soonest first, a batch at a time. Google lets the Gemini voice make about 100 recordings a day once billing is on for the key, and only about 10 on its free tier; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it. A side at a time, 100 recordings make about 50 cards. Record → Both sides together or 5 cards together reads several sides in one recording, which Google counts as one, then cuts it into a piece per side; the iPhone’s own speech recognition checks each piece says its line, and one that doesn’t is recorded again on its own. That makes about 100 or 400 cards a day, for the same price. Test Recording Together tries it on ten cards first, to hear beside the ones made a side at a time.")
+            SettingsFootnote("The cards chosen are read in a natural voice from Google Gemini; any others keep the iPhone voice, for free. With “Read questions naturally”, Gemini first rewrites each card the way a tutor would ask it: a cloze becomes a spoken question, and shorthand comes out in words. Each card is done once, the first time it’s read hands-free or ahead of time with Prepare Cards, and kept on this iPhone: about $2 for every 1,000 cards, twice that from January 2027. Prepare Cards does the cards due soonest first, a batch at a time. Google lets the Gemini voice make about 100 recordings a day once billing is on for the key, and only about 10 on its free tier; past that, and whenever a card isn’t ready within a few seconds, the iPhone voice reads it. A side at a time, 100 recordings make about 50 cards. Record → Both sides together, or 5, 10 or 20 cards together, reads several sides in one recording, which Google counts as one, then cuts it into a piece per side; the iPhone’s own speech recognition checks each piece says its line, and the ones that don’t are recorded together once more, then on their own. That makes about 100 cards a day, or 400, 800 or 1,600, for the same price. Test Recording Together tries it on ten cards first, to hear beside the ones made a side at a time.")
         }
     }
 
@@ -510,6 +510,8 @@ struct ReviewSettingsView: View {
         case .eachSide: "two for each card"
         case .bothSides: "one for each card"
         case .fiveCards: "one for up to five cards"
+        case .tenCards: "one for up to ten cards"
+        case .twentyCards: "one for up to twenty cards"
         }
         return "At this key’s limit of \(limit) recordings a day, \(how), about \(perDay) cards are done a day: roughly \(days) \(days == 1 ? "day" : "days") for the \(tally.remaining) still to do."
     }

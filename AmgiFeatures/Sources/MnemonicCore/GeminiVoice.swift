@@ -239,7 +239,7 @@ public enum GeminiSpeech {
     }
 
     static func makeRequest(text: String, voice: String, apiKey: String) throws -> URLRequest {
-        try makeRequest(text: text, style: style, voice: voice, apiKey: apiKey, timeout: 90)
+        try makeRequest(text: text, style: style, voice: voice, apiKey: apiKey, limit: maxInput, timeout: 90)
     }
 
     /// Several lines in one recording, to be cut apart (`RecordingSplitter`):
@@ -247,15 +247,22 @@ public enum GeminiSpeech {
     /// at, longer than any pause inside a line, so it can't be mistaken.
     public static let togetherStyle = style + ", with a pause of about two seconds after each paragraph"
 
-    /// The most text read in one recording of several lines: about a
-    /// minute and a half of speech, which Gemini reads as evenly as a
-    /// single line and the phone's speech recognition checks in one go.
-    public static let maxTogether = 1_200
+    /// The most text read in one recording of several lines: twenty cards'
+    /// worth (`AIVoiceTogether.maxCharacters`) and to spare.
+    static let maxTogetherInput = 6_000
 
-    /// Each line a paragraph of its own.
+    /// Each line a paragraph of its own. Five minutes of speech can take
+    /// Gemini a few minutes to make, all of it before any answer comes.
     static func makeRequest(lines: [String], voice: String, apiKey: String) throws -> URLRequest {
         let text = lines.map(paragraph).joined(separator: "\n\n")
-        return try makeRequest(text: text, style: togetherStyle, voice: voice, apiKey: apiKey, timeout: 180)
+        return try makeRequest(
+            text: text,
+            style: togetherStyle,
+            voice: voice,
+            apiKey: apiKey,
+            limit: maxTogetherInput,
+            timeout: 360
+        )
     }
 
     /// A line on one line, ending as a sentence does, so it's read as one
@@ -273,9 +280,10 @@ public enum GeminiSpeech {
         style: String,
         voice: String,
         apiKey: String,
+        limit: Int,
         timeout: TimeInterval
     ) throws -> URLRequest {
-        let line = GeminiAPI.Part(text: String(text.prefix(maxInput)), speechMetadata: .init(style: style))
+        let line = GeminiAPI.Part(text: String(text.prefix(limit)), speechMetadata: .init(style: style))
         let body = Request(
             contents: [GeminiAPI.Content(role: "user", parts: [line])],
             generationConfig: .init(

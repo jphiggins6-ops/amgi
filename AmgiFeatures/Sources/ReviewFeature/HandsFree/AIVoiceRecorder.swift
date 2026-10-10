@@ -505,21 +505,36 @@ extension AIVoiceRecorder {
         var onTheirOwn = toRecord
         if !stopped, toRecord.count > 1 {
             if SpokenCheck.isAvailable {
-                log.add("Recording \(toRecord.count) lines together, for \(cards.count) \(cards.count == 1 ? "card" : "cards")")
-                do {
-                    let outcome = try await recordTogether(toRecord, voice: voice)
-                    onTheirOwn = toRecord.filter { outcome.saved[$0] == nil }
-                    let cut = toRecord.count - onTheirOwn.count
-                    log.add("Cut apart: \(cut) of \(toRecord.count) lines passed the check", cut == toRecord.count ? .done : .step)
-                    for line in onTheirOwn {
-                        log.add("Left out \(CardVoiceLog.quote(line)): \(outcome.failed[line] ?? "")")
+                // The lines that don't pass get one more recording together,
+                // which costs one request however many there are, before
+                // any is recorded on its own, which costs one each.
+                var left = toRecord
+                var tries = 0
+                while left.count > 1, tries < 2 {
+                    tries += 1
+                    if tries == 1 {
+                        log.add("Recording \(left.count) lines together, for \(cards.count) \(cards.count == 1 ? "card" : "cards")")
+                    } else {
+                        log.add("Recording the \(left.count) lines that didn’t pass together again")
                     }
-                } catch {
-                    note(error, at: "the lines recorded together")
-                    if Self.stops(error) {
-                        stopped = true
+                    do {
+                        let outcome = try await recordTogether(left, voice: voice)
+                        let missed = left.filter { outcome.saved[$0] == nil }
+                        let cut = left.count - missed.count
+                        log.add("Cut apart: \(cut) of \(left.count) lines passed the check", missed.isEmpty ? .done : .step)
+                        for line in missed {
+                            log.add("Left out \(CardVoiceLog.quote(line)): \(outcome.failed[line] ?? "")")
+                        }
+                        left = missed
+                    } catch {
+                        note(error, at: "the lines recorded together")
+                        if Self.stops(error) {
+                            stopped = true
+                        }
+                        break
                     }
                 }
+                onTheirOwn = left
             } else {
                 log.add("The iPhone’s speech recognition isn’t allowed or isn’t on the phone, so each side is recorded on its own", .waiting)
             }

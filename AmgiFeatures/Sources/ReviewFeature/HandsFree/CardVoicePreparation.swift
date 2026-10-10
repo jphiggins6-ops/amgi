@@ -456,11 +456,16 @@ public final class CardVoicePreparation {
         settle(.preparing(done: 0, of: total))
         // A locked phone would pause the work.
         if keepingScreenOn { ScreenAwake.keep(.preparing) }
-        let together = ReviewPreferences.aiVoiceTogether.cards
+        let together = ReviewPreferences.aiVoiceTogether
         work = Task {
             let ending: Phase
-            if together > 0 {
-                ending = await workThroughQueue(plan: plan, total: total, cardsTogether: together)
+            if together.cards > 0 {
+                ending = await workThroughQueue(
+                    plan: plan,
+                    total: total,
+                    cardsTogether: together.cards,
+                    maxCharacters: together.maxCharacters
+                )
             } else {
                 ending = await workThroughQueue(plan: plan, total: total)
             }
@@ -570,7 +575,7 @@ public final class CardVoicePreparation {
     /// lines read together in one recording and cut apart, so Google's
     /// daily limit, which counts requests, goes further. Cards leave the
     /// queue once done, or once they can't be.
-    private func workThroughQueue(plan: Plan, total: Int, cardsTogether: Int) async -> Phase {
+    private func workThroughQueue(plan: Plan, total: Int, cardsTogether: Int, maxCharacters: Int) async -> Phase {
         let sides = CardVoiceSides()
         var done = 0
         var failed = 0
@@ -589,8 +594,8 @@ public final class CardVoicePreparation {
                 return .waiting(queued: queue.count, why: wait)
             }
 
-            // The next few cards still to do, up to about a minute and a
-            // half of speech.
+            // The next few cards still to do, up to `maxCharacters` of
+            // speech.
             var group: [(id: CardID, card: VoiceCard)] = []
             var characters = 0
             for cardId in queue {
@@ -607,7 +612,7 @@ public final class CardVoicePreparation {
                     continue
                 }
                 let size = card.question.count + card.answer.count
-                if !group.isEmpty, characters + size > GeminiSpeech.maxTogether { break }
+                if !group.isEmpty, characters + size > maxCharacters { break }
                 group.append((id: cardId, card: card))
                 characters += size
             }

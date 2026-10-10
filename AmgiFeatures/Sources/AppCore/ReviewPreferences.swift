@@ -174,12 +174,16 @@ public enum AIVoiceCards: String, CaseIterable, Identifiable, Sendable {
 /// requests, however much each one says, so several sides read in one
 /// recording, then cut apart and each checked by the phone's speech
 /// recognition, go further: about 100 cards a day with both sides of a
-/// card together, about 400 with five cards together, against 50 a side at
-/// a time.
+/// card together, 400 to 1,600 with 5 to 20 cards together, against 50 a
+/// side at a time. Not more than 20: that's five minutes or so of speech
+/// already, and the longer a recording, the likelier Gemini is to cut it
+/// short or lose its way, and the more one bad recording costs.
 public enum AIVoiceTogether: String, CaseIterable, Identifiable, Sendable {
     case eachSide = "side"
     case bothSides = "card"
     case fiveCards = "cards"
+    case tenCards = "cards10"
+    case twentyCards = "cards20"
 
     public var id: String { rawValue }
 
@@ -189,6 +193,20 @@ public enum AIVoiceTogether: String, CaseIterable, Identifiable, Sendable {
         case .eachSide: 0
         case .bothSides: 1
         case .fiveCards: 5
+        case .tenCards: 10
+        case .twentyCards: 20
+        }
+    }
+
+    /// The most text read in one recording, in characters: about a minute
+    /// and a half of speech for five cards, and so on. A card longer than
+    /// that is recorded with fewer others.
+    public var maxCharacters: Int {
+        switch self {
+        case .eachSide: 0
+        case .bothSides, .fiveCards: 1_200
+        case .tenCards: 2_400
+        case .twentyCards: 4_500
         }
     }
 
@@ -197,6 +215,8 @@ public enum AIVoiceTogether: String, CaseIterable, Identifiable, Sendable {
         case .eachSide: "One side at a time"
         case .bothSides: "Both sides together"
         case .fiveCards: "5 cards together"
+        case .tenCards: "10 cards together"
+        case .twentyCards: "20 cards together"
         }
     }
 
@@ -208,6 +228,8 @@ public enum AIVoiceTogether: String, CaseIterable, Identifiable, Sendable {
         case .eachSide: limit / 2
         case .bothSides: limit * 9 / 10
         case .fiveCards: limit * 4
+        case .tenCards: limit * 8
+        case .twentyCards: limit * 16
         }
     }
 }
