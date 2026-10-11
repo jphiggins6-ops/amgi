@@ -401,27 +401,66 @@ public final class ReviewSession {
             defer { isAdvancing = false }
             do {
                 try await cardClient.bury(cardId)
-                let queue = try await Task.detached {
-                    try scheduler.getQueuedCards(fetchLimit)
-                }.value
-                // Undo now takes back the bury, which isn't an answer.
-                canUndo = true
-                lastRating = nil
-                lastTalliedHomeDeck = nil
-                lastAnsweredCard = nil
-                lastProblemCard = nil
-                cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats, skipping: seenThisSession)
-                remainingCounts = DeckCounts(
-                    newCount: queue.newCount,
-                    learnCount: queue.learningCount,
-                    reviewCount: queue.reviewCount
-                )
-                await advanceToNextCard(notes: notes, notetypes: notetypes, notetypesClient: notetypesClient, cardRendering: cardRendering)
+                try await moveOn(scheduler: scheduler, fetchLimit: fetchLimit, notes: notes, notetypes: notetypes, notetypesClient: notetypesClient, cardRendering: cardRendering)
             } catch {
                 Log.review.error("Bury failed: \(error)")
                 answerError = error.localizedDescription
             }
         }
+    }
+
+    /// The card on screen has left the queue another way: its note
+    /// deleted, or the card suspended, buried, forgotten or given another
+    /// due date from ⋯. Moves on to the next card, as after an answer.
+    public func currentCardLeftQueue() {
+        guard !isAdvancing, currentQueuedCard != nil else { return }
+        isAdvancing = true
+        let scheduler = self.scheduler
+        let notes = self.notes
+        let notetypes = self.notetypes
+        let notetypesClient = self.notetypesClient
+        let cardRendering = self.cardRendering
+        let fetchLimit = queueFetchLimit
+        invalidatePrefetch()
+
+        Task {
+            defer { isAdvancing = false }
+            do {
+                try await moveOn(scheduler: scheduler, fetchLimit: fetchLimit, notes: notes, notetypes: notetypes, notetypesClient: notetypesClient, cardRendering: cardRendering)
+            } catch {
+                Log.review.error("Moving on failed: \(error)")
+                answerError = error.localizedDescription
+            }
+        }
+    }
+
+    /// The queue fetched again and the next card shown, after something
+    /// other than an answer took the card away.
+    private func moveOn(
+        scheduler: SchedulerService,
+        fetchLimit: Int32,
+        notes: NotesService,
+        notetypes: NotetypesService,
+        notetypesClient: NotetypesClient,
+        cardRendering: CardRenderingService
+    ) async throws {
+        let queue = try await Task.detached {
+            try scheduler.getQueuedCards(fetchLimit)
+        }.value
+        // Undo now takes back what took the card away, which isn't an
+        // answer.
+        canUndo = true
+        lastRating = nil
+        lastTalliedHomeDeck = nil
+        lastAnsweredCard = nil
+        lastProblemCard = nil
+        cardQueue = ReviewQueueOrder.arranged(queue.cards, defersRepeats: defersRepeats, skipping: seenThisSession)
+        remainingCounts = DeckCounts(
+            newCount: queue.newCount,
+            learnCount: queue.learningCount,
+            reviewCount: queue.reviewCount
+        )
+        await advanceToNextCard(notes: notes, notetypes: notetypes, notetypesClient: notetypesClient, cardRendering: cardRendering)
     }
 
     /// The card on screen moved to another deck (into 1_critical, say, or

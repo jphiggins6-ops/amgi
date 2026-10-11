@@ -181,7 +181,10 @@ struct ReviewContent: View {
                 model: cardActions,
                 cardId: session.currentCardId,
                 noteId: session.currentNote?.id,
-                confirmDeleteNote: $confirmDeleteNote
+                confirmDeleteNote: $confirmDeleteNote,
+                // A deleted note, or a card suspended, buried, forgotten
+                // or given another due date: on to the next card.
+                onAction: { advance in if advance { session.currentCardLeftQueue() } }
             )
             #if canImport(UIKit)
             .cardChromeToolbar(session: session, enabled: autoMatchCardBackground)
@@ -769,7 +772,8 @@ private struct CardActionsMenu: View {
                     model: cardActions,
                     cardId: cardId,
                     noteId: session.currentNote?.id,
-                    confirmDeleteNote: $confirmDeleteNote
+                    confirmDeleteNote: $confirmDeleteNote,
+                    onAction: { advance in if advance { session.currentCardLeftQueue() } }
                 )
             }
         } label: {
