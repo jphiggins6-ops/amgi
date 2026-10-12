@@ -132,9 +132,10 @@ struct ReviewContent: View {
             #endif
             .navigationBarTitleDisplayMode(.inline)
             #if canImport(UIKit)
-            // Seven items, no more: past what fits, iOS tucks the rest, the
-            // menu among them, behind a "⋯" of its own. Undo is in the menu,
-            // and the card count beside the progress bar.
+            // Seven items, no more, and four a side at most: past what fits,
+            // iOS tucks the rest behind a "⋯" of its own (the ✨ button went
+            // there when 1_critical's joined the right). Undo is in the
+            // menu, and the card count beside the progress bar.
             .toolbar {
                 ToolbarItemGroup(placement: .topBarLeading) {
                     Button {
@@ -145,11 +146,11 @@ struct ReviewContent: View {
                     .accessibilityLabel("Close")
                     ReviewEditButton(session: session, destination: $destination, shortcutEnabled: keyboardActive)
                     HandsFreeButton(controller: handsFree) { toggleHandsFree() }
+                    MnemonicCaptureButton(session: session, destination: $destination)
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     CriticalDeckButton(model: critical, session: session)
                     ReviewFlagButton(session: session, cardActions: cardActions)
-                    MnemonicCaptureButton(session: session, destination: $destination)
                     CardActionsMenu(
                         session: session,
                         cardActions: cardActions,
