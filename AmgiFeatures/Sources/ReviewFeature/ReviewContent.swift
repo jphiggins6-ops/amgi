@@ -47,6 +47,11 @@ struct ReviewContent: View {
     @Environment(\.palette) private var palette
     @State private var cardActions = CardContextMenuModel()
     @State private var confirmDeleteNote = false
+    /// The top bar's icons: a little smaller than a toolbar's own, so all
+    /// seven fit across the narrower iPhones.
+    static let toolbarFont = Font.system(size: 15, weight: .medium)
+    static let toolbarSpacing: CGFloat = 14
+
     /// Bumped when a ✨ idea is saved; drives the confirmation haptic.
     @State private var mnemonicSavedCount = 0
     /// Bumped when a tap or swipe flags a card, which otherwise shows only
@@ -132,37 +137,44 @@ struct ReviewContent: View {
             #endif
             .navigationBarTitleDisplayMode(.inline)
             #if canImport(UIKit)
-            // Seven items, no more, and four a side at most: past what fits,
-            // iOS tucks the rest behind a "⋯" of its own (the ✨ button went
-            // there when 1_critical's joined the right). Undo is in the
-            // menu, and the card count beside the progress bar.
+            // Seven buttons as two items, one a side, each its buttons in a
+            // row of smaller icons: iOS 26 gives every toolbar item room of
+            // its own and tucks those that don't fit behind a "⋯", which
+            // took the flag on a 6.3-inch iPhone. Undo is in the menu, and
+            // the card count beside the progress bar.
             .toolbar {
-                ToolbarItemGroup(placement: .topBarLeading) {
-                    Button {
-                        onDismiss()
-                    } label: {
-                        Image(systemName: "xmark")
+                ToolbarItem(placement: .topBarLeading) {
+                    HStack(spacing: Self.toolbarSpacing) {
+                        Button {
+                            onDismiss()
+                        } label: {
+                            Image(systemName: "xmark")
+                        }
+                        .accessibilityLabel("Close")
+                        ReviewEditButton(session: session, destination: $destination, shortcutEnabled: keyboardActive)
+                        HandsFreeButton(controller: handsFree) { toggleHandsFree() }
+                        MnemonicCaptureButton(session: session, destination: $destination)
                     }
-                    .accessibilityLabel("Close")
-                    ReviewEditButton(session: session, destination: $destination, shortcutEnabled: keyboardActive)
-                    HandsFreeButton(controller: handsFree) { toggleHandsFree() }
-                    MnemonicCaptureButton(session: session, destination: $destination)
+                    .font(Self.toolbarFont)
                 }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    CriticalDeckButton(model: critical, session: session)
-                    ReviewFlagButton(session: session, cardActions: cardActions)
-                    CardActionsMenu(
-                        session: session,
-                        cardActions: cardActions,
-                        destination: $destination,
-                        confirmDeleteNote: $confirmDeleteNote,
-                        showTimeLeft: $showTimeLeft,
-                        onExplain: { explain() },
-                        showsFlags: false,
-                        showsUndo: true,
-                        isHandsFreeOn: handsFree.isOn,
-                        onToggleHandsFree: { toggleHandsFree() }
-                    )
+                ToolbarItem(placement: .topBarTrailing) {
+                    HStack(spacing: Self.toolbarSpacing) {
+                        CriticalDeckButton(model: critical, session: session)
+                        ReviewFlagButton(session: session, cardActions: cardActions)
+                        CardActionsMenu(
+                            session: session,
+                            cardActions: cardActions,
+                            destination: $destination,
+                            confirmDeleteNote: $confirmDeleteNote,
+                            showTimeLeft: $showTimeLeft,
+                            onExplain: { explain() },
+                            showsFlags: false,
+                            showsUndo: true,
+                            isHandsFreeOn: handsFree.isOn,
+                            onToggleHandsFree: { toggleHandsFree() }
+                        )
+                    }
+                    .font(Self.toolbarFont)
                 }
             }
             // ⌘Z still undoes from a keyboard, with Undo in the menu.
