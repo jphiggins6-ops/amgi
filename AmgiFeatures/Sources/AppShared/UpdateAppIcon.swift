@@ -28,7 +28,10 @@ public func updateAppIcon(
     // Not from tests or previews: there's no icon to change, and the
     // notification center can't be reached from them.
     guard !AppIconColor.isTestOrPreview else { return }
-    AppIconColor.show(done: turnsGreen && style.isDone(today, at: now))
+    let done = style.isDone(today, at: now)
+    AppIconColor.show(done: turnsGreen && done)
+    // For the habit tracker, through the app group.
+    if done, let today { StudyDoneSignal.record(today, at: now) }
     #if os(iOS)
     await IconBadge.update(today, style: style, now: now)
     #endif

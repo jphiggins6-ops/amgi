@@ -179,4 +179,22 @@ import Testing
         TodaySnapshotStore.write(today(), to: defaults)
         #expect(TodaySnapshotStore.read(from: defaults) == today())
     }
+
+    @Test func theDayDoneIsLeftForTheHabitTracker() throws {
+        let defaults = try #require(UserDefaults(suiteName: "StudyDoneSignalTests"))
+        defaults.removePersistentDomain(forName: "StudyDoneSignalTests")
+        var start = DateComponents()
+        start.year = 2026
+        start.month = 10
+        start.day = 13
+        start.hour = 4
+        let dayStart = try #require(Calendar.current.date(from: start))
+        let done = TodaySnapshot(reviewsLeft: 0, reviewsTotal: 50, newLeft: 0, newTotal: 10, dueAgain: 0, dayStart: dayStart, rolloverHour: 4)
+        let finished = dayStart.addingTimeInterval(20 * 3600)
+        StudyDoneSignal.record(done, at: finished, in: defaults)
+        #expect(defaults.string(forKey: StudyDoneSignal.dayKey) == "2026-10-13", "the Anki day's date, though it's past midnight")
+        #expect(defaults.double(forKey: StudyDoneSignal.atKey) == finished.timeIntervalSince1970)
+        StudyDoneSignal.record(done, at: finished.addingTimeInterval(60), in: defaults)
+        #expect(defaults.double(forKey: StudyDoneSignal.atKey) == finished.timeIntervalSince1970, "the first time it was done stays")
+    }
 }

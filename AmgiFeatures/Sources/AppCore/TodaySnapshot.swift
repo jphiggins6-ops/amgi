@@ -129,3 +129,34 @@ public enum TodayWidgetState: Equatable, Sendable {
         return calendar.date(byAdding: .day, value: 1, to: start) ?? date.addingTimeInterval(86_400)
     }
 }
+
+/// The day's studying done, for other apps of the same developer team to
+/// read through the app group (`group.com.amgiapp`): the habit tracker
+/// ticks its "Anki" habit with it. Written when today's minimum is done, as
+/// the icon turns green (`updateAppIcon`), and never cleared: a reader
+/// compares the day with its own today.
+///
+/// In the group's shared defaults (`UserDefaults(suiteName:
+/// "group.com.amgiapp")`):
+/// - `amgi.studyDoneDay`: the day finished, "yyyy-MM-dd", the date the Anki
+///   day started on (Anki's day starts at 4 am unless set otherwise, so
+///   cards finished at 1 am count for the day before).
+/// - `amgi.studyDoneAt`: when, in seconds since 1970.
+public enum StudyDoneSignal {
+    public static let dayKey = "amgi.studyDoneDay"
+    public static let atKey = "amgi.studyDoneAt"
+
+    /// Marks the Anki day `today` describes as done.
+    public static func record(_ today: TodaySnapshot, at date: Date = Date(), in defaults: UserDefaults = AppGroup.defaults) {
+        let day = day(of: today.dayStart)
+        guard defaults.string(forKey: dayKey) != day else { return }
+        defaults.set(day, forKey: dayKey)
+        defaults.set(date.timeIntervalSince1970, forKey: atKey)
+    }
+
+    /// "2026-10-13": the local date `date` falls on.
+    public static func day(of date: Date, calendar: Calendar = .current) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+}
