@@ -9,6 +9,35 @@
 	</array>
 	<key>CFBundleDisplayName</key>
 	<string>Amgi</string>
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Anki Deck</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>net.ankiweb.apkg</string>
+				<string>net.ankiweb.colpkg</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Notes as Text</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.tab-separated-values-text</string>
+				<string>public.comma-separated-values-text</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIconName</key>
@@ -38,6 +67,47 @@
 	<string>Hands-free mode listens for the words you say to answer cards: “show”, “again”, “good” and so on.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>Hands-free mode turns the words you say into answers. It recognizes them on this iPhone whenever it can.</string>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<true/>
+	<key>UTImportedTypeDeclarations</key>
+	<array>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Anki Deck Package</string>
+			<key>UTTypeIdentifier</key>
+			<string>net.ankiweb.apkg</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>apkg</string>
+				</array>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.data</string>
+				<string>public.archive</string>
+			</array>
+			<key>UTTypeDescription</key>
+			<string>Anki Collection Package</string>
+			<key>UTTypeIdentifier</key>
+			<string>net.ankiweb.colpkg</string>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>colpkg</string>
+				</array>
+			</dict>
+		</dict>
+	</array>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Fonts/SarasaMonoK-Regular.ttf</string>

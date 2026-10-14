@@ -25,10 +25,13 @@ enum ImportError: Error, LocalizedError {
 
 public enum ImportHelper {
     public static func importPackage(from url: URL) async throws -> String {
-        guard url.startAccessingSecurityScopedResource() else {
+        // A file picked, or opened in place from Files, needs asking for;
+        // one another app hands over as a copy doesn't.
+        let accessing = url.startAccessingSecurityScopedResource()
+        defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+        guard FileManager.default.isReadableFile(atPath: url.path) else {
             throw ImportError.accessDenied
         }
-        defer { url.stopAccessingSecurityScopedResource() }
 
         let tempDir = FileManager.default.temporaryDirectory
         let tempFile = tempDir.appendingPathComponent(url.lastPathComponent)

@@ -36,6 +36,8 @@ public struct RootView: View {
 
     @State private var pendingReviewDeckId: DeckID?
     @State private var showImport = false
+    /// A deck or text file another app opened Amgi with.
+    @State private var openedFile: URL?
     @State private var refreshID = UUID()
 
     @Shared(.appStorage(ReaderPreferences.Keys.showTab))
@@ -59,6 +61,12 @@ public struct RootView: View {
             }
             .task { resumeCardVoices() }
             .onOpenURL { url in
+                // An .apkg, .colpkg, .tsv or .csv shared to Amgi, or opened
+                // from Files: imported as if picked.
+                if url.isFileURL {
+                    openedFile = url
+                    return
+                }
                 guard url.scheme == "amgi",
                       url.host == "review",
                       let deckIdStr = URLComponents(url: url, resolvingAgainstBaseURL: false)?
@@ -106,7 +114,7 @@ public struct RootView: View {
         }
         // still drives the tabs not yet on CollectionStore
         .syncFlow { refreshID = UUID() }
-        .deckImport(isPresented: $showImport) {
+        .deckImport(isPresented: $showImport, openedFile: $openedFile) {
             store.invalidateAll()
             refreshID = UUID()
         }
