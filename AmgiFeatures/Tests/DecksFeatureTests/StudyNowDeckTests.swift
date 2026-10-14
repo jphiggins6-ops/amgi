@@ -37,7 +37,7 @@ import ReviewFeature
         #expect(spec.id == DeckID(0), "no Study Now deck yet, so one is created")
         #expect(spec.name == "Study Now")
         #expect(spec.searchTerms == [
-            FilteredDeckSearchTerm(search: "is:due flag:0 -deck:p -rated:1", limit: 9999, order: .random)
+            FilteredDeckSearchTerm(search: "is:due flag:0 -deck:p -\"deck:Long Answers\" -rated:1", limit: 9999, order: .random)
         ])
         #expect(spec.reschedule, "answers must count as they would in the card's home deck")
     }
@@ -58,7 +58,7 @@ import ReviewFeature
         }
 
         #expect(specs.all.first?.searchTerms == [
-            FilteredDeckSearchTerm(search: "rated:1 is:due flag:0 -deck:p", limit: 9999, order: .random)
+            FilteredDeckSearchTerm(search: "rated:1 is:due flag:0 -deck:p -\"deck:Long Answers\"", limit: 9999, order: .random)
         ])
     }
 
@@ -180,6 +180,29 @@ import ReviewFeature
         #expect(today == DeckListModel.TodayProgress(
             reviewsLeft: 180, reviewsDone: 120, newLeft: 8, newDone: 12, dueAgain: 7
         ))
+    }
+
+    @Test func longAnswersHaveTheirOwnCountsAndHoldTheDayUpOnlyPastTheirGrace() async {
+        var deckClient = DeckClient()
+        deckClient.fetchTree = { [] }
+        var cardClient = CardClient()
+        var searches = Self.searches
+        searches[LongAnswers.requiredSearch] = 2
+        cardClient.search = Self.searching(searches)
+
+        let tree = [Self.deck(1, "Korean", new: 8, review: 3), Self.deck(3, "Long Answers", new: 3, review: 6)]
+        let today = await withDependencies {
+            $0.deckClient = deckClient
+            $0.cardClient = cardClient
+        } operation: {
+            await DeckListModel().todayProgress(tree: tree)
+        }
+
+        #expect(today.newLeft == 8, "Long Answers' new cards aren't the New button's")
+        #expect(today.longWaiting == 9)
+        #expect(today.longRequired == 2)
+        #expect(!today.isDone)
+        #expect(DeckListModel.reviewsRoundSearch.contains(LongAnswers.excluded))
     }
 
     @Test func reviewsOpensTodaysFirstLookWhileAnyCardsAreLeft() async throws {

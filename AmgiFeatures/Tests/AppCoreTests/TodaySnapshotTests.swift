@@ -37,6 +37,29 @@ import Testing
         #expect(today(reviewsLeft: 0, newLeft: 0).isDone)
     }
 
+    @Test func longAnswersPastTheirGraceHoldTheDayUp() throws {
+        var waiting = today(reviewsLeft: 0, newLeft: 0)
+        waiting.longAnswersRequired = 2
+        #expect(!waiting.isDone)
+        #expect(waiting.cardsLeft == 2)
+        #expect(waiting.fractionDone == 1, "the bar is reviews and new cards")
+        #expect(AppIconBadge.reviewsLeft.count(.progress(waiting)) == 2)
+
+        // Saved before Long Answers: no count, nothing held up.
+        var saved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(today(reviewsLeft: 0, newLeft: 0))) as? [String: Any] ?? [:]
+        saved.removeValue(forKey: "longAnswersRequired")
+        let old = try JSONDecoder().decode(TodaySnapshot.self, from: JSONSerialization.data(withJSONObject: saved))
+        #expect(old.longAnswersRequired == nil)
+        #expect(old.isDone)
+    }
+
+    @Test func longAnswersAreRequiredThreeDaysPastDue() {
+        #expect(LongAnswers.requiredSearch == "\"deck:Long Answers\" is:due prop:due<=-3 flag:0 -rated:1")
+        #expect(LongAnswers.excluded == "-\"deck:Long Answers\"")
+        #expect(LongAnswers.isDeck(named: "long answers"))
+        #expect(!LongAnswers.isDeck(named: "Neuro::Long Answers"), "top-level only")
+    }
+
     @Test func fractionDoneCountsBothHalves() {
         #expect(abs(today().fractionDone - 192.0 / 320.0) < 0.0001)
         #expect(today(reviewsLeft: 0, newLeft: 0).fractionDone == 1)

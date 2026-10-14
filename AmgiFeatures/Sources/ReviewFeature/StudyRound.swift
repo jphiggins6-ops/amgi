@@ -26,14 +26,18 @@ package struct StudyRound: Equatable, Sendable {
     /// Cards of today's round done before this session, from earlier
     /// sessions today or another device.
     package let doneEarlierToday: Int
-    /// Whether the other half of today's minimum is already done, so that
+    /// Whether the rest of today's minimum is already done, so that
     /// finishing this round finishes the day.
     package let finishesTheDay: Bool
+    /// Long Answers cards past their grace (`LongAnswers`): the part of
+    /// today's minimum that has a button of its own.
+    package let longAnswersRequired: Int
 
-    package init(kind: Kind, doneEarlierToday: Int = 0, finishesTheDay: Bool = false) {
+    package init(kind: Kind, doneEarlierToday: Int = 0, finishesTheDay: Bool = false, longAnswersRequired: Int = 0) {
         self.kind = kind
         self.doneEarlierToday = doneEarlierToday
         self.finishesTheDay = finishesTheDay
+        self.longAnswersRequired = longAnswersRequired
     }
 
     /// What the finish says, e.g. "Done for today".
@@ -46,6 +50,11 @@ package struct StudyRound: Equatable, Sendable {
     }
 
     var finishMessage: String {
+        if !finishesTheDay, longAnswersRequired > 0, kind != .again {
+            let cards = longAnswersRequired == 1 ? "1 Long Answers card has" : "\(longAnswersRequired) Long Answers cards have"
+            let done = kind == .reviews ? "Every card due today has had its turn." : "Today's new cards are learned."
+            return "\(done) \(cards) waited 3 days past due, so \(longAnswersRequired == 1 ? "it's" : "they're") needed to finish today."
+        }
         switch kind {
         case .reviews:
             finishesTheDay

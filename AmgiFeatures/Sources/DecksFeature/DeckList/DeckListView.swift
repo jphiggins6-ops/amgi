@@ -31,6 +31,8 @@ package struct DeckListView: View {
     @State private var showFilteredDecks = false
     @State private var showMnemonics = false
     @State private var studyNow: DeckListModel.StudyNowLaunch?
+    /// The Long Answers deck, open for study.
+    @State private var longAnswers: LongAnswersLaunch?
     @State private var isBuildingStudyNow = false
     @State private var studyNowError: String?
     @State private var showTodaySummary = false
@@ -78,6 +80,7 @@ package struct DeckListView: View {
             onRefresh: { await model.load() },
             onStartReviews: { Task { await startStudyNow(.reviews) } },
             onStartNew: { Task { await startStudyNow(.newCards) } },
+            onStartLongAnswers: { startLongAnswers() },
             onTapDeck: { row in pendingDeck = row.asDeckInfo },
             onDeleteDeck: { rawID in await model.delete(DeckID(rawID)) },
             onRenameDeck: { row in renameTarget = row },
@@ -121,6 +124,24 @@ package struct DeckListView: View {
                         try? await Task.sleep(for: .milliseconds(600))
                         showTodaySummary = true
                     }
+                }
+            }
+        }
+        .fullScreenCover(item: $longAnswers) { launch in
+            // The deck itself, not a round of Study Now: its own preset
+            // schedules it, new cards and all.
+            ReviewView(deckId: launch.deckId) {
+                longAnswers = nil
+                guard launch.requiredBefore > 0 else { return }
+                // The cards that were holding today up may be done now.
+                AppIconColor.hold()
+                Task {
+                    guard await model.isDoneForToday() else {
+                        AppIconColor.release()
+                        return
+                    }
+                    try? await Task.sleep(for: .milliseconds(600))
+                    showTodaySummary = true
                 }
             }
         }
@@ -228,7 +249,27 @@ package struct DeckListView: View {
         }
     }
 
+    private func startLongAnswers() {
+        guard let deckId = model.longAnswersDeckId else { return }
+        guard case .loaded(_, let hero, _) = model.state,
+              let counts = hero.longAnswers, counts.waiting > 0
+        else {
+            studyNowError = "Nothing in Long Answers is waiting. Add the cards that take a while to answer, the ones you write or draw out, to the Long Answers deck."
+            return
+        }
+        longAnswers = LongAnswersLaunch(deckId: deckId, requiredBefore: counts.required)
+    }
+
     private var showsProfilePicker: Bool {
         showProfileInToolbar && accounts.accounts.count > 1
     }
+}
+
+/// A study session of the Long Answers deck, and how many of its cards
+/// were holding today's minimum up as it opened.
+struct LongAnswersLaunch: Identifiable, Equatable {
+    let deckId: DeckID
+    let requiredBefore: Int
+
+    var id: Int64 { deckId.rawValue }
 }

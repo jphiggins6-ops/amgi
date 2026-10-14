@@ -39,7 +39,7 @@ public enum AppIconBadge: String, CaseIterable, Identifiable, Sendable {
         case (.cardsLeft, .progress(let today)):
             return today.cardsLeft
         case (.reviewsLeft, .progress(let today)):
-            return today.reviewsLeft
+            return today.reviewsLeft + (today.longAnswersRequired ?? 0)
         case (.cardsLeft, .newDay(let reviews?, let new)):
             return reviews + (new ?? 0)
         case (.reviewsLeft, .newDay(let reviews?, _)):
@@ -55,7 +55,7 @@ public enum AppIconBadge: String, CaseIterable, Identifiable, Sendable {
     public func isDone(_ today: TodaySnapshot?, at date: Date, calendar: Calendar = .current) -> Bool {
         guard let today, today.isCurrent(at: date, calendar: calendar) else { return false }
         switch self {
-        case .reviewsLeft: return today.reviewsLeft == 0
+        case .reviewsLeft: return today.reviewsLeft == 0 && (today.longAnswersRequired ?? 0) == 0
         case .cardsLeft, .off: return today.isDone
         }
     }

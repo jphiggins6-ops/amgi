@@ -23,6 +23,10 @@ public struct TodaySnapshot: Codable, Sendable, Equatable {
     public var dayStart: Date
     /// Anki's day-boundary hour (default 4 am).
     public var rolloverHour: Int
+    /// Long Answers cards past their grace (`LongAnswers`), not yet
+    /// answered today: part of today's minimum. Nil in a snapshot saved
+    /// before there was a Long Answers deck.
+    public var longAnswersRequired: Int?
 
     public init(
         reviewsLeft: Int,
@@ -31,7 +35,8 @@ public struct TodaySnapshot: Codable, Sendable, Equatable {
         newTotal: Int,
         dueAgain: Int,
         dayStart: Date,
-        rolloverHour: Int
+        rolloverHour: Int,
+        longAnswersRequired: Int = 0
     ) {
         self.reviewsLeft = reviewsLeft
         self.reviewsTotal = max(reviewsTotal, reviewsLeft)
@@ -40,21 +45,25 @@ public struct TodaySnapshot: Codable, Sendable, Equatable {
         self.dueAgain = dueAgain
         self.dayStart = dayStart
         self.rolloverHour = rolloverHour
+        self.longAnswersRequired = longAnswersRequired
     }
 
-    /// Every due card seen once and today's new cards learned.
+    /// Every due card seen once, today's new cards learned, and no Long
+    /// Answers card past its grace.
     public var isDone: Bool {
-        reviewsLeft == 0 && newLeft == 0
+        reviewsLeft == 0 && newLeft == 0 && (longAnswersRequired ?? 0) == 0
     }
 
-    public var cardsLeft: Int { reviewsLeft + newLeft }
+    /// What's left of today's minimum, Long Answers cards past their grace
+    /// included.
+    public var cardsLeft: Int { reviewsLeft + newLeft + (longAnswersRequired ?? 0) }
 
-    /// How much of today's minimum is done, 0...1. A day with nothing to
-    /// do is done.
+    /// How much of today's reviews and new cards is done, 0...1. A day with
+    /// nothing to do is done.
     public var fractionDone: Double {
         let total = reviewsTotal + newTotal
         guard total > 0 else { return 1 }
-        return Double(total - cardsLeft) / Double(total)
+        return Double(total - reviewsLeft - newLeft) / Double(total)
     }
 
     /// When these numbers stop applying: the next Anki day boundary.
@@ -158,5 +167,33 @@ public enum StudyDoneSignal {
     public static func day(of date: Date, calendar: Calendar = .current) -> String {
         let parts = calendar.dateComponents([.year, .month, .day], from: date)
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+}
+
+/// The Long Answers deck: cards that take a while to answer, written out
+/// or drawn (the brachial plexus, the basal ganglia's circuits), studied
+/// with the Library's own button for them when there's time.
+///
+/// Its cards stay out of the Reviews and New buttons, and a card due there
+/// becomes part of today's minimum (the green icon, the habit tracker's
+/// tick) only once it has waited `graceDays` past its due date: due on
+/// Monday, it's optional Monday to Wednesday and required from Thursday.
+/// A top-level deck, made the first time the Library opens.
+public enum LongAnswers {
+    public static let deckName = "Long Answers"
+    /// Days past its due date a card can wait before it's required.
+    public static let graceDays = 3
+
+    /// The deck, in a search.
+    public static let deckSearch = "\"deck:\(deckName)\""
+    /// Leaves the deck out of a search.
+    public static let excluded = "-\(deckSearch)"
+    /// Its cards waiting past their grace, unflagged, not yet answered
+    /// today.
+    public static let requiredSearch = "\(deckSearch) is:due prop:due<=-\(graceDays) flag:0 -rated:1"
+
+    /// Whether `name`, a deck's full name, is the Long Answers deck.
+    public static func isDeck(named name: String) -> Bool {
+        name.caseInsensitiveCompare(deckName) == .orderedSame
     }
 }

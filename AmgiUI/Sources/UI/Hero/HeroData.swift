@@ -25,6 +25,8 @@ public struct HeroData: Equatable, Hashable, Sendable {
     /// Cards seen today that are due again: what Reviews offers once every
     /// due card has been seen.
     public let againCount: Int
+    /// The Long Answers button's counts; nil when there's no such deck.
+    public let longAnswers: LongAnswerCounts?
     public let streak: Int
     public let last14Days: [Int]    // oldest → newest, length 14
 
@@ -35,6 +37,7 @@ public struct HeroData: Equatable, Hashable, Sendable {
         reviewTotal: Int? = nil,
         newTotal: Int? = nil,
         againCount: Int = 0,
+        longAnswers: LongAnswerCounts? = nil,
         streak: Int,
         last14Days: [Int]
     ) {
@@ -43,14 +46,28 @@ public struct HeroData: Equatable, Hashable, Sendable {
         self.newCount = newCount
         self.newTotal = max(newTotal ?? newCount, newCount)
         self.againCount = againCount
+        self.longAnswers = longAnswers
         self.streak = streak
         self.last14Days = last14Days
     }
 
+    /// The cards that take a while, studied when there's time: those
+    /// waiting, and those past their few days' grace, which today's
+    /// minimum needs.
+    public struct LongAnswerCounts: Equatable, Hashable, Sendable {
+        public let waiting: Int
+        public let required: Int
+
+        public init(waiting: Int, required: Int) {
+            self.waiting = max(waiting, required)
+            self.required = required
+        }
+    }
+
     /// Today's minimum is done: every due card seen once, today's new
-    /// cards learned.
+    /// cards learned, and no long answer past its grace.
     public var isDoneForToday: Bool {
-        reviewCount == 0 && newCount == 0
+        reviewCount == 0 && newCount == 0 && (longAnswers?.required ?? 0) == 0
     }
 
     /// The same counts with the review-history decorations filled in.
@@ -61,6 +78,7 @@ public struct HeroData: Equatable, Hashable, Sendable {
             reviewTotal: reviewTotal,
             newTotal: newTotal,
             againCount: againCount,
+            longAnswers: longAnswers,
             streak: streak,
             last14Days: last14Days
         )

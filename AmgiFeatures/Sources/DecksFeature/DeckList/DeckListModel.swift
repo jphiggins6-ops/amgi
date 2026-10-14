@@ -24,6 +24,8 @@ import ReviewFeature
 @MainActor
 final class DeckListModel {
     var state: LibraryListContent.State = .loading
+    /// The Long Answers deck, once found (`LongAnswers`).
+    private(set) var longAnswersDeckId: DeckID?
 
     @ObservationIgnored @Dependency(\.deckClient) private var deckClient
     @ObservationIgnored @Dependency(\.cardClient) private var cardClient
@@ -61,16 +63,21 @@ final class DeckListModel {
                 state = .empty
                 return
             }
+            if await makeLongAnswersDeckIfNeeded(tree) { return }
             let rows = tree.map(DeckListRow.init(node:))
             let viewRows = rows.map(\.viewData)
             // The two study buttons: what's left of today, and of how many.
             let today = await todayProgress(tree: tree)
+            longAnswersDeckId = Self.longAnswersDeck(in: tree)?.id
             let counts = HeroData(
                 reviewCount: today.reviewsLeft,
                 newCount: today.newLeft,
                 reviewTotal: today.reviewsLeft + today.reviewsDone,
                 newTotal: today.newLeft + today.newDone,
                 againCount: today.dueAgain,
+                longAnswers: longAnswersDeckId == nil
+                    ? nil
+                    : HeroData.LongAnswerCounts(waiting: today.longWaiting, required: today.longRequired),
                 streak: carried?.hero.streak ?? 0,
                 last14Days: carried?.hero.last14Days ?? Array(repeating: 0, count: 14)
             )
@@ -139,6 +146,17 @@ final class DeckListModel {
         var newDone = 0
         /// Cards answered today that are due again.
         var dueAgain = 0
+        /// Long Answers cards a session of that deck would show now: due,
+        /// in learning, and new within its limit.
+        var longWaiting = 0
+        /// Long Answers cards past their grace: part of today's minimum.
+        var longRequired = 0
+
+        /// Today's minimum: every due card seen once, today's new cards
+        /// learned, and no Long Answers card past its grace.
+        var isDone: Bool {
+            reviewsLeft == 0 && newLeft == 0 && longRequired == 0
+        }
     }
 
     func todayProgress(tree: [DeckTreeNode]) async -> TodayProgress {
@@ -146,20 +164,53 @@ final class DeckListModel {
         let reviewsDone = await count(Self.reviewsDoneTodaySearch)
         let newDone = await count(Self.newCardsLearnedTodaySearch)
         let dueAgain = await count(Self.gatherable(Self.dueAgainSearch))
-        return TodayProgress(
+        var progress = TodayProgress(
             reviewsLeft: reviewsLeft,
             reviewsDone: reviewsDone,
             newLeft: Self.newCardsToday(in: tree),
             newDone: newDone,
             dueAgain: dueAgain
         )
+        if let longAnswers = Self.longAnswersDeck(in: tree) {
+            let counts = longAnswers.counts
+            progress.longWaiting = counts.newCount + counts.learnCount + counts.reviewCount
+            progress.longRequired = await count(LongAnswers.requiredSearch)
+        }
+        return progress
     }
 
-    /// Every due card seen once today and today's new cards learned.
+    /// Every due card seen once today, today's new cards learned, and no
+    /// Long Answers card past its grace.
     func isDoneForToday() async -> Bool {
         let tree = (try? await deckClient.fetchTree()) ?? []
-        let today = await todayProgress(tree: tree)
-        return today.reviewsLeft == 0 && today.newLeft == 0
+        return await todayProgress(tree: tree).isDone
+    }
+
+    /// The Long Answers deck: top-level, as the Reviews and New buttons
+    /// leave out only that.
+    static func longAnswersDeck(in tree: [DeckTreeNode]) -> DeckTreeNode? {
+        tree.first { !$0.isFiltered && LongAnswers.isDeck(named: $0.name) }
+    }
+
+    /// Makes the Long Answers deck the first time the Library opens, so
+    /// it's there to add cards to; not again, should it be deleted. True
+    /// when it was made: the collection's change reloads the Library.
+    private func makeLongAnswersDeckIfNeeded(_ tree: [DeckTreeNode]) async -> Bool {
+        let key = "long_answers_deck_made"
+        // Not from unit tests, whose collections are stubs.
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil,
+              Self.longAnswersDeck(in: tree) == nil,
+              !UserDefaults.standard.bool(forKey: key)
+        else { return false }
+        UserDefaults.standard.set(true, forKey: key)
+        do {
+            let made = try await deckClient.create(LongAnswers.deckName)
+            store.apply(made.changes)
+            return true
+        } catch {
+            Log.decks.error("Making the Long Answers deck failed: \(error)")
+            return false
+        }
     }
 
     /// The Today widget's copy of `today`.
@@ -171,7 +222,8 @@ final class DeckListModel {
             newTotal: today.newLeft + today.newDone,
             dueAgain: today.dueAgain,
             dayStart: AnkiDay.start(of: now, rolloverHour: rolloverHour),
-            rolloverHour: rolloverHour
+            rolloverHour: rolloverHour,
+            longAnswersRequired: today.longRequired
         )
     }
 
@@ -205,7 +257,8 @@ final class DeckListModel {
             return StudyNowLaunch(deckId: deckId, round: StudyRound(
                 kind: .reviews,
                 doneEarlierToday: today.reviewsDone,
-                finishesTheDay: today.newLeft == 0
+                finishesTheDay: today.newLeft == 0 && today.longRequired == 0,
+                longAnswersRequired: today.longRequired
             ))
         case .reviews:
             guard today.dueAgain > 0 else { throw StudyNowError.nothingDue }
@@ -216,7 +269,8 @@ final class DeckListModel {
             return StudyNowLaunch(deckId: deckId, round: StudyRound(
                 kind: .newCards,
                 doneEarlierToday: today.newDone,
-                finishesTheDay: today.reviewsLeft == 0
+                finishesTheDay: today.reviewsLeft == 0 && today.longRequired == 0,
+                longAnswersRequired: today.longRequired
             ))
         }
     }
@@ -239,14 +293,15 @@ final class DeckListModel {
     /// today. A card missed today waits for the `again` round, however
     /// soon it's due, which is also why the count of what's left never
     /// grows back.
-    static let reviewsRoundSearch = "is:due flag:0 -deck:p -rated:1"
+    /// Long Answers cards have a button of their own (`LongAnswers`).
+    static let reviewsRoundSearch = "is:due flag:0 -deck:p \(LongAnswers.excluded) -rated:1"
     /// Cards answered today that are due again.
-    static let dueAgainSearch = "rated:1 is:due flag:0 -deck:p"
+    static let dueAgainSearch = "rated:1 is:due flag:0 -deck:p \(LongAnswers.excluded)"
     /// Today's reviews done: answered today and not new this morning,
     /// whatever their flag now.
-    static let reviewsDoneTodaySearch = "rated:1 -introduced:1 -deck:p"
+    static let reviewsDoneTodaySearch = "rated:1 -introduced:1 -deck:p \(LongAnswers.excluded)"
     /// Today's new cards done: first answered today.
-    static let newCardsLearnedTodaySearch = "introduced:1 -deck:p"
+    static let newCardsLearnedTodaySearch = "introduced:1 -deck:p \(LongAnswers.excluded)"
 
     /// Counts what `search` would gather right now. Gathering skips cards
     /// held by other filtered decks, but only after returning Study Now's
@@ -335,10 +390,12 @@ final class DeckListModel {
     }
 
     /// A top-level deck the New button draws from: not a filtered deck
-    /// (Study Now included), not "p", and with new cards left today.
+    /// (Study Now included), not "p" or Long Answers, and with new cards
+    /// left today.
     static func offersNewCards(_ deck: DeckTreeNode) -> Bool {
         !deck.isFiltered
             && deck.name.caseInsensitiveCompare("p") != .orderedSame
+            && !LongAnswers.isDeck(named: deck.name)
             && deck.counts.newCount > 0
     }
 

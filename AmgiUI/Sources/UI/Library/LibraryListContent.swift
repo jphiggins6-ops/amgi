@@ -23,6 +23,7 @@ public struct LibraryListContent: View {
     let onRefresh: () async -> Void
     let onStartReviews: () -> Void
     let onStartNew: () -> Void
+    let onStartLongAnswers: (() -> Void)?
     let onTapDeck: (DeckRowViewData) -> Void
     let onDeleteDeck: (Int64) async -> Void
     let onRenameDeck: (DeckRowViewData) -> Void
@@ -37,6 +38,7 @@ public struct LibraryListContent: View {
         onRefresh: @escaping () async -> Void,
         onStartReviews: @escaping () -> Void,
         onStartNew: @escaping () -> Void,
+        onStartLongAnswers: (() -> Void)? = nil,
         onTapDeck: @escaping (DeckRowViewData) -> Void,
         onDeleteDeck: @escaping (Int64) async -> Void,
         onRenameDeck: @escaping (DeckRowViewData) -> Void,
@@ -48,6 +50,7 @@ public struct LibraryListContent: View {
         self.onRefresh = onRefresh
         self.onStartReviews = onStartReviews
         self.onStartNew = onStartNew
+        self.onStartLongAnswers = onStartLongAnswers
         self.onTapDeck = onTapDeck
         self.onDeleteDeck = onDeleteDeck
         self.onRenameDeck = onRenameDeck
@@ -91,6 +94,7 @@ public struct LibraryListContent: View {
                     activityPending: heatmap == nil,
                     onStartReviews: onStartReviews,
                     onStartNew: onStartNew,
+                    onStartLongAnswers: onStartLongAnswers,
                     onShowTodaySummary: onShowTodaySummary
                 )
                     .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 12, trailing: 0))

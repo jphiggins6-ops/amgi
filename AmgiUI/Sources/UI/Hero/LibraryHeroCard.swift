@@ -9,7 +9,8 @@ public import SwiftUI
 import Theme
 
 /// Library hero card: today's two study buttons, Reviews and New, under the
-/// streak pill and over the 14-day sparkline.
+/// streak pill and over the 14-day sparkline, with Long Answers, the cards
+/// that take a while, on a slimmer button of their own below them.
 ///
 /// Each button shows what's left of today's fixed total ("120 of 300") and
 /// turns into a tick once it's done. Once every due card has been seen,
@@ -19,6 +20,8 @@ public struct LibraryHeroCard: View {
     let data: HeroData
     let onStartReviews: () -> Void
     let onStartNew: () -> Void
+    /// Opens the Long Answers deck; its button shows when there's one.
+    let onStartLongAnswers: (() -> Void)?
     /// Opens the end-of-day summary; offered once today's minimum is done.
     let onShowTodaySummary: (() -> Void)?
     /// True while the review-history fetch that feeds `streak` and
@@ -36,12 +39,14 @@ public struct LibraryHeroCard: View {
         activityPending: Bool = false,
         onStartReviews: @escaping () -> Void,
         onStartNew: @escaping () -> Void,
+        onStartLongAnswers: (() -> Void)? = nil,
         onShowTodaySummary: (() -> Void)? = nil
     ) {
         self.data = data
         self.activityPending = activityPending
         self.onStartReviews = onStartReviews
         self.onStartNew = onStartNew
+        self.onStartLongAnswers = onStartLongAnswers
         self.onShowTodaySummary = onShowTodaySummary
     }
 
@@ -58,6 +63,10 @@ public struct LibraryHeroCard: View {
                 HStack(spacing: 12) {
                     HeroStudyButton(tile: reviewsTile, action: onStartReviews)
                     HeroStudyButton(tile: newTile, action: onStartNew)
+                }
+
+                if let longAnswers = data.longAnswers, let onStartLongAnswers {
+                    LongAnswersButton(counts: longAnswers, action: onStartLongAnswers)
                 }
 
                 if data.isDoneForToday, let onShowTodaySummary {
@@ -268,6 +277,72 @@ private struct HeroStudyButton: View {
         case .done(let hadAny):
             hadAny ? "\(tile.title), done for today" : "\(tile.title), none today"
         }
+    }
+}
+
+// MARK: - Long Answers
+
+/// The Long Answers deck's button: a slim row under the two big ones, as
+/// these cards are studied when there's time. Those past their grace, which
+/// today's minimum needs, show in orange.
+private struct LongAnswersButton: View {
+    let counts: HeroData.LongAnswerCounts
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "pencil.and.list.clipboard")
+                    .amgiFont(size: 17, weight: .semibold, relativeTo: .body)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Long Answers")
+                        .amgiFont(size: 15, weight: .semibold, relativeTo: .subheadline)
+                    Text(verbatim: detail)
+                        .amgiFont(size: 12, weight: .medium, relativeTo: .caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+                Spacer(minLength: 8)
+                if counts.required > 0 {
+                    Text(verbatim: "\(counts.required) due")
+                        .amgiFont(size: 13, weight: .bold, relativeTo: .footnote)
+                        .monospacedDigit()
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(Color.orange, in: Capsule())
+                }
+                Text(verbatim: "\(counts.waiting)")
+                    .amgiFont(size: 22, weight: .bold, relativeTo: .title2)
+                    .monospacedDigit()
+                Image(systemName: counts.waiting > 0 ? "play.fill" : "checkmark")
+                    .amgiFont(size: 13, weight: .semibold, relativeTo: .footnote)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.white.opacity(counts.waiting > 0 ? 0.18 : 0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        // As with the big buttons: inside a List row the default style would
+        // make the whole row one button.
+        .buttonStyle(.pressScale)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityAddTraits(.isButton)
+    }
+
+    private var detail: String {
+        if counts.required > 0 {
+            return "Some have waited 3 days: due for today’s minimum"
+        }
+        return counts.waiting > 0 ? "When you have time" : "Nothing waiting"
+    }
+
+    private var accessibilityText: String {
+        var text = "Long Answers, \(counts.waiting) waiting"
+        if counts.required > 0 { text += ", \(counts.required) needed today" }
+        return text
     }
 }
 
