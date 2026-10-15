@@ -55,7 +55,7 @@ package struct StudyRound: Equatable, Sendable {
             let done = kind == .reviews ? "Every card due today has had its turn." : "Today's new cards are learned."
             return "\(done) \(cards) waited 3 days past due, so \(longAnswersRequired == 1 ? "it's" : "they're") needed to finish today."
         }
-        switch kind {
+        return switch kind {
         case .reviews:
             finishesTheDay
                 ? "Every card due today has had its turn, and today's new cards are learned."
