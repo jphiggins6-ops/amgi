@@ -4,6 +4,7 @@
 //
 
 public import AnkiKit
+import AppCore
 import AnkiClients
 import AnkiServices
 import Dependencies
@@ -30,12 +31,16 @@ public final class CardVoiceSides: Sendable {
         self.rendering = rendering
     }
 
+    /// What the AI voice never reads: suspended cards, and the Peripheral
+    /// Nerve Examination deck's (`NerveExam`), left to the iPhone voice.
+    private static let voiced = "-is:suspended \(NerveExam.excluded)"
+
     /// Every card that isn't suspended, the soonest due first: cards being
     /// learned and those due now, then the reviews due on each of the next
     /// `days` days, with new cards worked in at `newPerDay` a day in the
     /// order they'll be introduced, then the rest.
     public func cardIdsByDueDate(newPerDay: Int, days: Int = 60) async throws -> [CardID] {
-        let unsuspended = "-is:suspended"
+        let unsuspended = Self.voiced
         var ordered: [CardID] = []
         var seen: Set<CardID> = []
         func add(_ ids: [CardID]) {
@@ -72,7 +77,13 @@ public final class CardVoiceSides: Sendable {
 
     /// Every card that isn't suspended, in no particular order.
     public func cardIds() async throws -> [CardID] {
-        try await cards.search("-is:suspended")
+        try await cards.search(Self.voiced)
+    }
+
+    /// The cards the AI voice leaves to the iPhone's: the Peripheral Nerve
+    /// Examination deck's. Empty if the search fails.
+    public func cardIdsLeftToTheiPhoneVoice() async -> Set<CardID> {
+        Set((try? await cards.search(NerveExam.deckSearch)) ?? [])
     }
 
     /// The card's question side and answer side, nil when it can't be

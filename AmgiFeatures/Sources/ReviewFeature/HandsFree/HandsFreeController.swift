@@ -79,6 +79,9 @@ final class HandsFreeController {
     /// of them with `AIVoiceCards.all`); nil when it's off or there's no
     /// Gemini key.
     @ObservationIgnored private var aiVoiceSince: Date?
+    /// Cards read in the iPhone voice whatever `aiVoiceSince` says: the
+    /// Peripheral Nerve Examination deck's (`NerveExam`).
+    @ObservationIgnored private var leftToTheiPhoneVoice: Set<CardID> = []
 
     private var speaker: CardSpeaker { audio.speaker }
     private var listener: VoiceListener { audio.listener }
@@ -169,6 +172,10 @@ final class HandsFreeController {
             aiVoiceSince = aiCards == .all ? .distantPast : ReviewPreferences.aiVoiceSince
         } else {
             aiVoiceSince = nil
+        }
+        leftToTheiPhoneVoice = []
+        if aiVoiceSince != nil {
+            leftToTheiPhoneVoice = await CardVoiceSides().cardIdsLeftToTheiPhoneVoice()
         }
         voiceProblem = nil
         // Off after a flag, so the side isn't read again: it listens on.
@@ -458,7 +465,9 @@ final class HandsFreeController {
     /// cards chosen, added after `aiVoiceSince` (a card's id is the moment
     /// it was added, in milliseconds), and its question has words to read.
     private func recordsInAIVoice(_ cardId: CardID?, _ card: VoiceCard) -> Bool {
-        guard let aiVoiceSince, let cardId, !card.written.question.isEmpty else { return false }
+        guard let aiVoiceSince, let cardId, !card.written.question.isEmpty,
+              !leftToTheiPhoneVoice.contains(cardId)
+        else { return false }
         return Double(cardId.rawValue) / 1000 >= aiVoiceSince.timeIntervalSince1970
     }
 

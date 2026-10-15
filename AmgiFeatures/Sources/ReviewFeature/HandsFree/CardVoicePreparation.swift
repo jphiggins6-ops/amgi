@@ -651,6 +651,12 @@ public final class CardVoicePreparation {
     /// time. A card leaves the queue once it's done, or once it can't be.
     private func workThroughQueue(plan: Plan, total: Int) async -> Phase {
         let sides = CardVoiceSides()
+        // Cards queued before their deck was left to the iPhone voice.
+        let leftOut = await sides.cardIdsLeftToTheiPhoneVoice()
+        if queue.contains(where: { leftOut.contains($0) }) {
+            queue.removeAll { leftOut.contains($0) }
+        }
+        let total = min(total, queue.count)
         var done = 0
         var failed = 0
         var failuresInARow = 0
@@ -729,6 +735,12 @@ public final class CardVoicePreparation {
     /// queue once done, or once they can't be.
     private func workThroughQueue(plan: Plan, total: Int, cardsTogether: Int, maxCharacters: Int) async -> Phase {
         let sides = CardVoiceSides()
+        // Cards queued before their deck was left to the iPhone voice.
+        let leftOut = await sides.cardIdsLeftToTheiPhoneVoice()
+        if queue.contains(where: { leftOut.contains($0) }) {
+            queue.removeAll { leftOut.contains($0) }
+        }
+        let total = min(total, queue.count)
         var done = 0
         var failed = 0
         var failuresInARow = 0
