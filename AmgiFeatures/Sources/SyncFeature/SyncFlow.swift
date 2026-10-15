@@ -6,6 +6,7 @@
 //
 
 package import SwiftUI
+import AppCore
 import AppShared
 import Dependencies
 
@@ -23,9 +24,11 @@ private struct SyncFlowModifier: ViewModifier {
 
     @Dependency(\.syncCoordinator) private var coordinator
     @Dependency(\.collectionStore) private var store
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var toast = SyncToastController()
     @State private var showSheet = false
+    private var reviewActivity: ReviewActivity { .shared }
 
     func body(content: Content) -> some View {
         content
@@ -39,14 +42,60 @@ private struct SyncFlowModifier: ViewModifier {
                     .presentationDragIndicator(.visible)
             }
             .onChange(of: SyncToastController.needsAttention(coordinator.state)) { _, needs in
-                if needs { showSheet = true }
+                guard needs else { return }
+                // An automatic sync that failed (no signal, say) waits for
+                // the next one; one that needs a choice made, or a sign-in,
+                // asks for it.
+                if coordinator.isAutomatic, !coordinator.requiresLogin,
+                   case .error = coordinator.state { return }
+                showSheet = true
             }
             .onChange(of: coordinator.state) { _, newState in
-                toast.handle(newState)
+                if !coordinator.isAutomatic { toast.handle(newState) }
                 if case .success = newState { store.invalidateAll() }
             }
             .syncToastOverlay(toast.toast, onDismiss: { toast.dismiss() })
+            // Automatic sync: on opening Amgi and every few minutes while
+            // it's open, on leaving it, and as each review session ends —
+            // never during one.
+            .task(id: scenePhase) {
+                guard scenePhase == .active else { return }
+                await autoSync(ifOlderThan: AutoSync.onOpen)
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: AutoSync.every)
+                    guard !Task.isCancelled else { return }
+                    await autoSync(ifOlderThan: AutoSync.whileOpen)
+                }
+            }
+            .onChange(of: scenePhase) { _, phase in
+                guard phase == .background else { return }
+                Task { await autoSync(ifOlderThan: AutoSync.onLeaving) }
+            }
+            .onChange(of: reviewActivity.isReviewing) { _, isReviewing in
+                guard !isReviewing else { return }
+                Task {
+                    // A beat for the screen underneath to settle, and for a
+                    // second session opened straight after this one.
+                    try? await Task.sleep(for: AutoSync.afterReview)
+                    await autoSync(ifOlderThan: 0)
+                }
+            }
     }
+
+    private func autoSync(ifOlderThan interval: TimeInterval) async {
+        guard !reviewActivity.isReviewing else { return }
+        await coordinator.autoSync(ifOlderThan: interval)
+    }
+}
+
+/// When automatic sync runs. The `TimeInterval`s are how recent a sync can
+/// be for this one to be skipped.
+private enum AutoSync {
+    static let onOpen: TimeInterval = 2 * 60
+    static let every: Duration = .seconds(5 * 60)
+    static let whileOpen: TimeInterval = 4 * 60
+    static let onLeaving: TimeInterval = 30
+    static let afterReview: Duration = .seconds(3)
 }
 
 /// Starts a sync. Installed by `.syncFlow()`; a no-op elsewhere, so a preview

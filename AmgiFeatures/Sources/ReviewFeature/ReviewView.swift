@@ -129,7 +129,10 @@ package struct ReviewView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .background { saveRoundProgress() }
         }
+        // Automatic sync holds off while this is open and runs once it closes.
+        .onAppear { ReviewActivity.shared.opened() }
         .onDisappear {
+            ReviewActivity.shared.closed()
             ReviewAudioSession.release()
             Task { await writeWidgetSnapshot() }
         }

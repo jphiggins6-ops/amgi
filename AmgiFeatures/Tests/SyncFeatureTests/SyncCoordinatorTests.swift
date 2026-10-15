@@ -134,6 +134,28 @@ struct SyncCoordinatorTests {
     }
 
     @Test @MainActor
+    func aTapDuringAnAutomaticSyncMakesItShow() async throws {
+        try await withDependencies {
+            $0.appStorageKeyFormatWarningEnabled = false
+            $0.syncClient.sync = { SyncSummary() }
+            $0.syncClient.mediaSyncStatus = { MediaSyncStatus(active: true, progress: nil) }
+            $0.syncClient.abortMediaSync = {}
+        } operation: {
+            let coordinator = SyncCoordinator(mediaPollInterval: .seconds(10))
+            await coordinator.startSync(automatic: true)
+            #expect(coordinator.isAutomatic)
+            try await Task.sleep(for: .milliseconds(50))
+            await coordinator.startSync()
+            #expect(!coordinator.isAutomatic)
+            await coordinator.cancelAndWait()
+            // The next automatic one is quiet again.
+            await coordinator.startSync(automatic: true)
+            #expect(coordinator.isAutomatic)
+            await coordinator.cancelAndWait()
+        }
+    }
+
+    @Test @MainActor
     func startSyncErrorTransitions() async throws {
         try await withDependencies {
             $0.appStorageKeyFormatWarningEnabled = false

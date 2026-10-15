@@ -31,6 +31,10 @@ public struct LibraryListContent: View {
     let onShowTodaySummary: (() -> Void)?
 
     @AppStorage("appearance_deck_layout") private var layout: DeckLayout = .list
+    /// The deck whose Delete was tapped, to confirm. One confirmation for
+    /// the whole list: an alert on each row or card picked the wrong one,
+    /// the grid's cards all sitting in a single list row.
+    @SwiftUI.State private var deckToDelete: DeckRowViewData?
 
     public init(
         state: State,
@@ -110,7 +114,7 @@ public struct LibraryListContent: View {
                             data: row,
                             isSelected: row.id == selectedDeckID,
                             onTap: { onTapDeck(row) },
-                            onDelete: { Task { await onDeleteDeck(row.id) } },
+                            onDelete: { deckToDelete = row },
                             onRename: { onRenameDeck(row) }
                         )
                         .modifier(DeckRowChrome(isSelected: row.id == selectedDeckID))
@@ -125,7 +129,7 @@ public struct LibraryListContent: View {
                                 data: row,
                                 isSelected: row.id == selectedDeckID,
                                 onTap: { onTapDeck(row) },
-                                onDelete: { Task { await onDeleteDeck(row.id) } },
+                                onDelete: { deckToDelete = row },
                                 onRename: { onRenameDeck(row) }
                             )
                         }
@@ -149,6 +153,26 @@ public struct LibraryListContent: View {
         .libraryListStyle()
         .scrollContentBackground(.hidden)
         .refreshable { await onRefresh() }
+        .alert(
+            "Delete “\(deckToDelete?.fullName ?? "")”?",
+            isPresented: Binding(get: { deckToDelete != nil }, set: { if !$0 { deckToDelete = nil } }),
+            presenting: deckToDelete
+        ) { deck in
+            Button("Delete", role: .destructive) {
+                Task { await onDeleteDeck(deck.id) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { deck in
+            Text(Self.deleteMessage(for: deck))
+        }
+    }
+
+    private static func deleteMessage(for deck: DeckRowViewData) -> String {
+        switch deck.subdeckCount {
+        case 0: "This permanently deletes the deck and all its cards."
+        case 1: "This permanently deletes the deck, its subdeck and all their cards."
+        case let count: "This permanently deletes the deck, its \(count) subdecks and all their cards."
+        }
     }
 
     private var deckSectionHeader: some View {

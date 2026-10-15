@@ -7,6 +7,7 @@
 
 import AnkiKit
 public import Foundation
+import Observation
 
 public enum ReaderThemeMode: String, CaseIterable, Identifiable {
     case system
@@ -502,4 +503,25 @@ private extension SyncPreferences {
         let profile = String(mapped).trimmingCharacters(in: CharacterSet(charactersIn: "_"))
         return profile.isEmpty ? "default" : profile
     }
+}
+
+/// Whether a review screen is open, so automatic sync waits for the end
+/// of the session: a sync that pulls changes mid-review could change the
+/// cards under the queue being shown.
+@MainActor
+@Observable
+public final class ReviewActivity {
+    public static let shared = ReviewActivity()
+
+    /// Review screens open now. A count, not a flag: one cover can open
+    /// over another (a Library round opened from a deep link, say).
+    public private(set) var openScreens = 0
+
+    public var isReviewing: Bool { openScreens > 0 }
+
+    public func opened() { openScreens += 1 }
+
+    public func closed() { openScreens = max(openScreens - 1, 0) }
+
+    private init() {}
 }

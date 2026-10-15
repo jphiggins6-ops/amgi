@@ -29,6 +29,7 @@ What Amgi does today. For how it is put together, see [ARCHITECTURE.md](ARCHITEC
 ## Decks
 
 - **Hierarchical deck tree** — recursive expand/collapse with new/learning/review count badges on every node, as a list or a grid.
+- **Rename and delete** — swipe a deck in the list (or long-press it in the grid) to rename or delete it. Delete asks first, naming the deck and how many subdecks go with it.
 - **Deck detail** — per-deck counts, retention, average cards/day, mature card count, and subdeck breakdown.
 - **Per-deck study options** — FSRS weights editor with optimizer and simulator, preset CRUD, Easy Days, bury rules, review timer, auto-advance.
 - **Custom study and filtered decks** — extend today's new-card and review limits per deck, and rebuild or empty a filtered deck to return its cards to their home decks.
@@ -60,6 +61,7 @@ What Amgi does today. For how it is put together, see [ARCHITECTURE.md](ARCHITEC
 - **Safe sync merge** — when local and server collections diverge, merge them (keeping cards from both sides) instead of being forced to overwrite one. Destructive choices require explicit confirmation.
 - **Multi-profile accounts** — isolated collections per profile, a fast picker in the Library toolbar, and per-profile sync credentials and review history.
 - **Offline-first** — everything works offline; sync when you have a connection.
+- **Automatic sync** — once sync is set up, Amgi syncs on its own, quietly (no toast): on opening it (unless it synced in the last 2 minutes), every 5 minutes while it's open, on leaving it (finishing in the background), and a few seconds after each review session closes. It never syncs while a review screen is open. A sync that fails (no signal, say) waits for the next one; one that needs a choice (a full sync) or a fresh sign-in opens the sync sheet. Pulling down on the Library syncs as the Sync button does, with its toast.
 
 ## Statistics
 

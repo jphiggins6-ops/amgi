@@ -77,7 +77,12 @@ package struct DeckListView: View {
         LibraryListContent(
             state: model.state,
             selectedDeckID: pendingDeck?.id.rawValue,
-            onRefresh: { await model.load() },
+            // Pulling down syncs, as the Sync button does; the list reloads
+            // again once the sync brings anything in.
+            onRefresh: {
+                onSync()
+                await model.load()
+            },
             onStartReviews: { Task { await startStudyNow(.reviews) } },
             onStartNew: { Task { await startStudyNow(.newCards) } },
             onStartLongAnswers: { startLongAnswers() },

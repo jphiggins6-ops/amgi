@@ -15,7 +15,6 @@ public struct DeckListRowView: View {
     let onDelete: () -> Void
     let onRename: () -> Void
 
-    @State private var showDeleteAlert = false
     @Environment(\.palette) private var palette
 
     public init(
@@ -58,19 +57,17 @@ public struct DeckListRowView: View {
         .buttonStyle(.plain)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) { showDeleteAlert = true } label: {
+            // Not `role: .destructive`, which has the list take the row
+            // away before anything's confirmed. The list asks first
+            // (`onDelete`), naming this deck.
+            Button(action: onDelete) {
                 Label("Delete", systemImage: "trash")
             }
+            .tint(.red)
             Button { onRename() } label: {
                 Label("Rename", systemImage: "pencil")
             }
             .tint(.orange)
-        }
-        .alert("Delete \"\(data.name)\"?", isPresented: $showDeleteAlert) {
-            Button("Delete", role: .destructive, action: onDelete)
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will permanently delete the deck and all its cards.")
         }
     }
 

@@ -32,6 +32,9 @@ package final class SyncCoordinator {
     private(set) var state: SyncState = .idle
     private(set) var logEntries: [SyncLogEntry] = []
     private(set) var requiresLogin: Bool = false
+    /// Whether the sync under way was started by Amgi rather than by a tap.
+    /// An automatic one stays quiet: no toast, and no sheet for an error.
+    private(set) var isAutomatic = false
 
     var lastSuccessfulSync: Date? {
         lastSyncedAtUnix > 0 ? Date(timeIntervalSince1970: lastSyncedAtUnix) : nil
@@ -105,12 +108,16 @@ package final class SyncCoordinator {
 
     // MARK: - Public surface (stubs filled in Phase B)
 
-    func startSync() async {
+    func startSync(automatic: Bool = false) async {
         guard activeTask == nil else {
+            // A tap during an automatic sync takes it over, so its toast
+            // follows it to the end.
+            if !automatic { isAutomatic = false }
             appendLog("Sync already in progress", level: .warning)
             return
         }
 
+        isAutomatic = automatic
         clearLog()
         state = .syncing(message: "Connecting…")
         appendLog("Starting sync")
@@ -156,12 +163,38 @@ package final class SyncCoordinator {
         activeTask = task
     }
 
+    /// Syncs on Amgi's own initiative, if it's set up to sync, nothing is
+    /// waiting on a decision, and the last sync was longer ago than
+    /// `interval`. With Amgi in the background, it asks iOS for the time
+    /// to finish.
+    func autoSync(ifOlderThan interval: TimeInterval) async {
+        guard activeTask == nil,
+              !requiresLogin,
+              KeychainHelper.loadEndpoint() != nil,
+              KeychainHelper.loadHostKey() != nil
+        else { return }
+        switch state {
+        case .needsFullSync, .noServer, .syncing, .syncingMedia: return
+        case .idle, .success, .error: break
+        }
+        if let last = lastSuccessfulSync, Date().timeIntervalSince(last) < interval { return }
+
+        await startSync(automatic: true)
+        #if canImport(UIKit)
+        guard UIApplication.shared.applicationState == .background else { return }
+        beginBackgroundExecutionIfNeeded()
+        await activeTask?.value
+        endBackgroundExecutionIfNeeded()
+        #endif
+    }
+
     func confirmFullSync(direction: SyncDirection) async {
         guard case .needsFullSync = state else {
             appendLog("Cannot confirm full sync — not in needsFullSync state", level: .warning)
             return
         }
 
+        isAutomatic = false
         let label = direction == .upload ? "Uploading collection" : "Downloading collection"
         state = .syncing(message: label)
         appendLog("Full sync started: \(direction == .upload ? "upload" : "download")")

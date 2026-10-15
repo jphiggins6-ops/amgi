@@ -26,7 +26,6 @@ public struct DeckGridCardView: View {
     let onDelete: () -> Void
     let onRename: () -> Void
 
-    @State private var showDeleteAlert = false
     @Environment(\.palette) private var palette
 
     public init(
@@ -73,15 +72,10 @@ public struct DeckGridCardView: View {
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .contextMenu {
             Button { onRename() } label: { Label("Rename", systemImage: "pencil") }
-            Button(role: .destructive) { showDeleteAlert = true } label: {
+            // The list asks first (`onDelete`), naming this deck.
+            Button(role: .destructive, action: onDelete) {
                 Label("Delete", systemImage: "trash")
             }
-        }
-        .alert("Delete \"\(data.name)\"?", isPresented: $showDeleteAlert) {
-            Button("Delete", role: .destructive, action: onDelete)
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This will permanently delete the deck and all its cards.")
         }
     }
 
