@@ -22,6 +22,9 @@ public struct LibraryHeroCard: View {
     let onStartNew: () -> Void
     /// Opens the Long Answers deck; its button shows when there's one.
     let onStartLongAnswers: (() -> Void)?
+    /// Starts the Peripheral Nerve Examination deck's Reviews (false) or
+    /// New (true); its buttons show when there's such a deck.
+    let onStartNerveExam: ((_ newCards: Bool) -> Void)?
     /// Opens the end-of-day summary; offered once today's minimum is done.
     let onShowTodaySummary: (() -> Void)?
     /// True while the review-history fetch that feeds `streak` and
@@ -40,6 +43,7 @@ public struct LibraryHeroCard: View {
         onStartReviews: @escaping () -> Void,
         onStartNew: @escaping () -> Void,
         onStartLongAnswers: (() -> Void)? = nil,
+        onStartNerveExam: ((_ newCards: Bool) -> Void)? = nil,
         onShowTodaySummary: (() -> Void)? = nil
     ) {
         self.data = data
@@ -47,6 +51,7 @@ public struct LibraryHeroCard: View {
         self.onStartReviews = onStartReviews
         self.onStartNew = onStartNew
         self.onStartLongAnswers = onStartLongAnswers
+        self.onStartNerveExam = onStartNerveExam
         self.onShowTodaySummary = onShowTodaySummary
     }
 
@@ -67,6 +72,10 @@ public struct LibraryHeroCard: View {
 
                 if let longAnswers = data.longAnswers, let onStartLongAnswers {
                     LongAnswersButton(counts: longAnswers, action: onStartLongAnswers)
+                }
+
+                if let nerveExam = data.nerveExam, let onStartNerveExam {
+                    NerveExamButtons(counts: nerveExam, onStart: onStartNerveExam)
                 }
 
                 if data.isDoneForToday, let onShowTodaySummary {
@@ -343,6 +352,61 @@ private struct LongAnswersButton: View {
         var text = "Long Answers, \(counts.waiting) waiting"
         if counts.required > 0 { text += ", \(counts.required) needed today" }
         return text
+    }
+}
+
+// MARK: - Peripheral Nerve Examination
+
+/// The Peripheral Nerve Examination deck's own Reviews and New, slim like
+/// Long Answers: extra study, never needed for today's minimum.
+private struct NerveExamButtons: View {
+    let counts: HeroData.NerveExamCounts
+    let onStart: (_ newCards: Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Peripheral Nerve Examination", systemImage: "hand.raised")
+                .amgiFont(size: 13, weight: .semibold, relativeTo: .footnote)
+                .foregroundStyle(.white.opacity(0.85))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            HStack(spacing: 8) {
+                pill(
+                    title: counts.reviews == 0 && counts.again > 0 ? "Again" : "Reviews",
+                    count: counts.reviews > 0 ? counts.reviews : counts.again,
+                    isDone: counts.reviews == 0 && counts.again == 0,
+                    newCards: false
+                )
+                pill(title: "New", count: counts.newCount, isDone: counts.newCount == 0, newCards: true)
+            }
+        }
+    }
+
+    private func pill(title: String, count: Int, isDone: Bool, newCards: Bool) -> some View {
+        Button { onStart(newCards) } label: {
+            HStack(spacing: 8) {
+                Text(verbatim: title)
+                    .amgiFont(size: 15, weight: .semibold, relativeTo: .subheadline)
+                Spacer(minLength: 4)
+                Text(verbatim: "\(count)")
+                    .amgiFont(size: 18, weight: .bold, relativeTo: .title3)
+                    .monospacedDigit()
+                Image(systemName: isDone ? "checkmark" : "play.fill")
+                    .amgiFont(size: 12, weight: .semibold, relativeTo: .footnote)
+            }
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
+            .frame(maxWidth: .infinity)
+            .background(.white.opacity(isDone ? 0.12 : 0.18), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        // As with the big buttons: inside a List row the default style would
+        // make the whole row one button.
+        .buttonStyle(.pressScale)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Peripheral Nerve Examination \(title), \(count)")
+        .accessibilityAddTraits(.isButton)
     }
 }
 

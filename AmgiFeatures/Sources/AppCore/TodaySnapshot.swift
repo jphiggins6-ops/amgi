@@ -197,3 +197,22 @@ public enum LongAnswers {
         name.caseInsensitiveCompare(deckName) == .orderedSame
     }
 }
+
+/// The Peripheral Nerve Examination deck: studied with Reviews and New
+/// buttons of its own in the Library, whenever there's time. Its cards stay
+/// out of the main Reviews and New buttons and never count toward today's
+/// minimum (the green icon, the widget, the habit tracker's tick). Found
+/// wherever it sits in the deck tree.
+public enum NerveExam {
+    public static let deckName = "Peripheral Nerve Examination"
+
+    /// The deck and its subdecks, at the top level or inside another deck.
+    public static let deckSearch = "(\"deck:\(deckName)\" OR \"deck:*::\(deckName)\")"
+    /// Leaves the deck out of a search.
+    public static let excluded = "-\"deck:\(deckName)\" -\"deck:*::\(deckName)\""
+
+    /// Whether `name`, a deck's own name (its last part), is this deck.
+    public static func isDeck(named name: String) -> Bool {
+        name.caseInsensitiveCompare(deckName) == .orderedSame
+    }
+}

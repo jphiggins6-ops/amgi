@@ -24,6 +24,7 @@ public struct LibraryListContent: View {
     let onStartReviews: () -> Void
     let onStartNew: () -> Void
     let onStartLongAnswers: (() -> Void)?
+    let onStartNerveExam: ((_ newCards: Bool) -> Void)?
     let onTapDeck: (DeckRowViewData) -> Void
     let onDeleteDeck: (Int64) async -> Void
     let onRenameDeck: (DeckRowViewData) -> Void
@@ -43,6 +44,7 @@ public struct LibraryListContent: View {
         onStartReviews: @escaping () -> Void,
         onStartNew: @escaping () -> Void,
         onStartLongAnswers: (() -> Void)? = nil,
+        onStartNerveExam: ((_ newCards: Bool) -> Void)? = nil,
         onTapDeck: @escaping (DeckRowViewData) -> Void,
         onDeleteDeck: @escaping (Int64) async -> Void,
         onRenameDeck: @escaping (DeckRowViewData) -> Void,
@@ -55,6 +57,7 @@ public struct LibraryListContent: View {
         self.onStartReviews = onStartReviews
         self.onStartNew = onStartNew
         self.onStartLongAnswers = onStartLongAnswers
+        self.onStartNerveExam = onStartNerveExam
         self.onTapDeck = onTapDeck
         self.onDeleteDeck = onDeleteDeck
         self.onRenameDeck = onRenameDeck
@@ -99,6 +102,7 @@ public struct LibraryListContent: View {
                     onStartReviews: onStartReviews,
                     onStartNew: onStartNew,
                     onStartLongAnswers: onStartLongAnswers,
+                    onStartNerveExam: onStartNerveExam,
                     onShowTodaySummary: onShowTodaySummary
                 )
                     .listRowInsets(EdgeInsets(top: 6, leading: 0, bottom: 12, trailing: 0))

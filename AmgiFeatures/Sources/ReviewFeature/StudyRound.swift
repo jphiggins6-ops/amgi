@@ -20,6 +20,9 @@ package struct StudyRound: Equatable, Sendable {
         case newCards
         /// Another look at cards seen today that are due again.
         case again
+        /// The Peripheral Nerve Examination deck's own buttons (`NerveExam`):
+        /// its due cards, or its new ones. Not part of today's minimum.
+        case nerveExam(newCards: Bool)
     }
 
     package let kind: Kind
@@ -46,11 +49,12 @@ package struct StudyRound: Equatable, Sendable {
         case .reviews: finishesTheDay ? "Done for today" : "Reviews done"
         case .newCards: finishesTheDay ? "Done for today" : "New cards done"
         case .again: "Round done"
+        case .nerveExam(let newCards): newCards ? "New cards done" : "Reviews done"
         }
     }
 
     var finishMessage: String {
-        if !finishesTheDay, longAnswersRequired > 0, kind != .again {
+        if !finishesTheDay, longAnswersRequired > 0, kind == .reviews || kind == .newCards {
             let cards = longAnswersRequired == 1 ? "1 Long Answers card has" : "\(longAnswersRequired) Long Answers cards have"
             let done = kind == .reviews ? "Every card due today has had its turn." : "Today's new cards are learned."
             return "\(done) \(cards) waited 3 days past due, so \(longAnswersRequired == 1 ? "it's" : "they're") needed to finish today."
@@ -66,6 +70,10 @@ package struct StudyRound: Equatable, Sendable {
                 : "Today's new cards are learned. Today's reviews are still waiting."
         case .again:
             "Cards you've seen today come back to Reviews as they fall due again."
+        case .nerveExam(let newCards):
+            newCards
+                ? "Today's new Peripheral Nerve Examination cards are learned. They're extra: today's minimum doesn't need them."
+                : "Every Peripheral Nerve Examination card due has had its turn. They're extra: today's minimum doesn't need them."
         }
     }
 
@@ -79,7 +87,7 @@ package struct StudyRound: Equatable, Sendable {
             updated.reviewsLeft = min(cardsLeft, today.reviewsTotal)
         case .newCards:
             updated.newLeft = min(cardsLeft, today.newTotal)
-        case .again:
+        case .again, .nerveExam:
             return nil
         }
         return updated
@@ -87,6 +95,6 @@ package struct StudyRound: Equatable, Sendable {
 
     /// The day's minimum gets a seal; anything less, a tick.
     var finishSymbol: String {
-        finishesTheDay && kind != .again ? "checkmark.seal.fill" : "checkmark.circle.fill"
+        finishesTheDay && (kind == .reviews || kind == .newCards) ? "checkmark.seal.fill" : "checkmark.circle.fill"
     }
 }

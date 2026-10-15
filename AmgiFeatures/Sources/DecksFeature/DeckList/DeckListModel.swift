@@ -78,6 +78,7 @@ final class DeckListModel {
                 longAnswers: longAnswersDeckId == nil
                     ? nil
                     : HeroData.LongAnswerCounts(waiting: today.longWaiting, required: today.longRequired),
+                nerveExam: today.nerveExam,
                 streak: carried?.hero.streak ?? 0,
                 last14Days: carried?.hero.last14Days ?? Array(repeating: 0, count: 14)
             )
@@ -151,6 +152,9 @@ final class DeckListModel {
         var longWaiting = 0
         /// Long Answers cards past their grace: part of today's minimum.
         var longRequired = 0
+        /// The Peripheral Nerve Examination deck's buttons; nil without
+        /// the deck. Never part of today's minimum.
+        var nerveExam: HeroData.NerveExamCounts?
 
         /// Today's minimum: every due card seen once, today's new cards
         /// learned, and no Long Answers card past its grace.
@@ -160,6 +164,7 @@ final class DeckListModel {
     }
 
     func todayProgress(tree: [DeckTreeNode]) async -> TodayProgress {
+        let nerveDeck = Self.nerveExamDeck(in: tree)
         let reviewsLeft = await count(Self.gatherable(Self.reviewsRoundSearch))
         let reviewsDone = await count(Self.reviewsDoneTodaySearch)
         let newDone = await count(Self.newCardsLearnedTodaySearch)
@@ -167,7 +172,7 @@ final class DeckListModel {
         var progress = TodayProgress(
             reviewsLeft: reviewsLeft,
             reviewsDone: reviewsDone,
-            newLeft: Self.newCardsToday(in: tree),
+            newLeft: max(Self.newCardsToday(in: tree) - Self.nerveExamNewInOtherDecks(tree), 0),
             newDone: newDone,
             dueAgain: dueAgain
         )
@@ -176,7 +181,36 @@ final class DeckListModel {
             progress.longWaiting = counts.newCount + counts.learnCount + counts.reviewCount
             progress.longRequired = await count(LongAnswers.requiredSearch)
         }
+        if let nerveDeck {
+            let reviews = await count(Self.gatherable(Self.nerveExamReviewsSearch))
+            let again = await count(Self.gatherable(Self.nerveExamAgainSearch))
+            progress.nerveExam = HeroData.NerveExamCounts(
+                reviews: reviews,
+                newCount: nerveDeck.counts.newCount,
+                again: again
+            )
+        }
         return progress
+    }
+
+    /// The Peripheral Nerve Examination deck (`NerveExam`), wherever it
+    /// sits in the tree.
+    static func nerveExamDeck(in tree: [DeckTreeNode]) -> DeckTreeNode? {
+        for node in tree where !node.isFiltered {
+            if NerveExam.isDeck(named: node.name) { return node }
+            if let found = nerveExamDeck(in: node.children) { return found }
+        }
+        return nil
+    }
+
+    /// The deck's new cards when it sits inside a deck the New button
+    /// draws from, and so are counted in that deck's: taken off the New
+    /// button's count. A guess when the parent's own limit is the smaller.
+    static func nerveExamNewInOtherDecks(_ tree: [DeckTreeNode]) -> Int {
+        guard let deck = nerveExamDeck(in: tree),
+              tree.contains(where: { offersNewCards($0) && $0.id != deck.id && nerveExamDeck(in: $0.children) != nil })
+        else { return 0 }
+        return deck.counts.newCount
     }
 
     /// Every due card seen once today, today's new cards learned, and no
@@ -243,6 +277,9 @@ final class DeckListModel {
     enum StudyButton: Sendable {
         case reviews
         case newCards
+        /// The Peripheral Nerve Examination deck's own buttons.
+        case nerveExamReviews
+        case nerveExamNew
     }
 
     /// Builds the round a study button opens. Reviews opens today's first
@@ -272,6 +309,26 @@ final class DeckListModel {
                 finishesTheDay: today.reviewsLeft == 0 && today.longRequired == 0,
                 longAnswersRequired: today.longRequired
             ))
+        case .nerveExamReviews:
+            let counts = today.nerveExam
+            let search: String
+            if (counts?.reviews ?? 0) > 0 {
+                search = Self.nerveExamReviewsSearch
+            } else if (counts?.again ?? 0) > 0 {
+                search = Self.nerveExamAgainSearch
+            } else {
+                throw StudyNowError.nerveExamNothingDue
+            }
+            let deckId = try await buildGatheredDeck(search)
+            return StudyNowLaunch(deckId: deckId, round: StudyRound(kind: .nerveExam(newCards: false)))
+        case .nerveExamNew:
+            guard let deck = Self.nerveExamDeck(in: tree), deck.counts.newCount > 0 else {
+                throw StudyNowError.nerveExamNoNewCards
+            }
+            let deckId = try await buildNewCardsDeck(from: { tree in
+                Self.nerveExamDeck(in: tree).map { [$0] } ?? []
+            })
+            return StudyNowLaunch(deckId: deckId, round: StudyRound(kind: .nerveExam(newCards: true)))
         }
     }
 
@@ -294,14 +351,20 @@ final class DeckListModel {
     /// soon it's due, which is also why the count of what's left never
     /// grows back.
     /// Long Answers cards have a button of their own (`LongAnswers`).
-    static let reviewsRoundSearch = "is:due flag:0 -deck:p \(LongAnswers.excluded) -rated:1"
+    /// So does the Peripheral Nerve Examination deck (`NerveExam`).
+    static let reviewsRoundSearch = "is:due flag:0 -deck:p \(LongAnswers.excluded) \(NerveExam.excluded) -rated:1"
     /// Cards answered today that are due again.
-    static let dueAgainSearch = "rated:1 is:due flag:0 -deck:p \(LongAnswers.excluded)"
+    static let dueAgainSearch = "rated:1 is:due flag:0 -deck:p \(LongAnswers.excluded) \(NerveExam.excluded)"
     /// Today's reviews done: answered today and not new this morning,
     /// whatever their flag now.
-    static let reviewsDoneTodaySearch = "rated:1 -introduced:1 -deck:p \(LongAnswers.excluded)"
+    static let reviewsDoneTodaySearch = "rated:1 -introduced:1 -deck:p \(LongAnswers.excluded) \(NerveExam.excluded)"
     /// Today's new cards done: first answered today.
-    static let newCardsLearnedTodaySearch = "introduced:1 -deck:p \(LongAnswers.excluded)"
+    static let newCardsLearnedTodaySearch = "introduced:1 -deck:p \(LongAnswers.excluded) \(NerveExam.excluded)"
+    /// The Peripheral Nerve Examination deck's Reviews button: as the main
+    /// one, but only that deck.
+    static let nerveExamReviewsSearch = "\(NerveExam.deckSearch) is:due flag:0 -rated:1"
+    /// Its cards answered today that are due again.
+    static let nerveExamAgainSearch = "\(NerveExam.deckSearch) rated:1 is:due flag:0"
 
     /// Counts what `search` would gather right now. Gathering skips cards
     /// held by other filtered decks, but only after returning Study Now's
@@ -317,7 +380,7 @@ final class DeckListModel {
         case .again:
             return try await buildGatheredDeck(Self.dueAgainSearch)
         case .newCards:
-            return try await buildNewCardsDeck()
+            return try await buildNewCardsDeck(from: { tree in tree.filter { Self.offersNewCards($0) } })
         }
     }
 
@@ -357,7 +420,7 @@ final class DeckListModel {
     /// and then gathered by id. The session's `ReviewView` charges them back
     /// to those limits (`countsNewCardsAgainstHomeDecks`), which the engine
     /// would otherwise credit to Study Now.
-    private func buildNewCardsDeck() async throws -> DeckID {
+    private func buildNewCardsDeck(from decks: ([DeckTreeNode]) -> [DeckTreeNode]) async throws -> DeckID {
         var tree = try await deckClient.fetchTree()
         let existing = FilteredDeckPresetsModel.filteredDecksByName(tree)[Self.studyNowDeckName]
         if let existing {
@@ -367,20 +430,26 @@ final class DeckListModel {
             tree = try await deckClient.fetchTree()
         }
 
+        let sources = decks(tree)
         var picked: [CardID] = []
-        for deck in tree where Self.offersNewCards(deck) {
+        for deck in sources where deck.counts.newCount > 0 {
             // Queue 0 is Anki's new queue. The limit covers the whole queue:
             // new cards can sit behind reviews.
             let queue = try await cardClient.fetchQueue(deck.id, deck.counts.total)
             picked += queue.filter { $0.queue == 0 }.map(\.id)
         }
         guard !picked.isEmpty else { throw StudyNowError.noNewCards }
+        // The Peripheral Nerve Examination deck's cards stay out of the main
+        // New button's round, should the deck sit inside one it draws from.
+        let search = sources.contains(where: { NerveExam.isDeck(named: $0.name) })
+            ? Self.cardIDSearch(picked)
+            : "\(Self.cardIDSearch(picked)) \(NerveExam.excluded)"
 
         let spec = FilteredDeckSpec(
             id: existing?.id ?? DeckID(0),
             name: Self.studyNowDeckName,
             searchTerms: [
-                FilteredDeckSearchTerm(search: Self.cardIDSearch(picked), limit: picked.count, order: .random)
+                FilteredDeckSearchTerm(search: search, limit: picked.count, order: .random)
             ],
             reschedule: true
         )
@@ -396,6 +465,7 @@ final class DeckListModel {
         !deck.isFiltered
             && deck.name.caseInsensitiveCompare("p") != .orderedSame
             && !LongAnswers.isDeck(named: deck.name)
+            && !NerveExam.isDeck(named: deck.name)
             && deck.counts.newCount > 0
     }
 
@@ -413,11 +483,15 @@ final class DeckListModel {
     enum StudyNowError: LocalizedError, Equatable {
         case noNewCards
         case nothingDue
+        case nerveExamNothingDue
+        case nerveExamNoNewCards
 
         var errorDescription: String? {
             switch self {
             case .noNewCards: "There are no new cards left for today."
             case .nothingDue: "Every card due today has had its turn. Cards you've seen come back here as they fall due again."
+            case .nerveExamNothingDue: "No Peripheral Nerve Examination cards are due."
+            case .nerveExamNoNewCards: "There are no new Peripheral Nerve Examination cards left for today."
             }
         }
     }

@@ -27,6 +27,9 @@ public struct HeroData: Equatable, Hashable, Sendable {
     public let againCount: Int
     /// The Long Answers button's counts; nil when there's no such deck.
     public let longAnswers: LongAnswerCounts?
+    /// The Peripheral Nerve Examination deck's buttons; nil when there's no
+    /// such deck.
+    public let nerveExam: NerveExamCounts?
     public let streak: Int
     public let last14Days: [Int]    // oldest → newest, length 14
 
@@ -38,6 +41,7 @@ public struct HeroData: Equatable, Hashable, Sendable {
         newTotal: Int? = nil,
         againCount: Int = 0,
         longAnswers: LongAnswerCounts? = nil,
+        nerveExam: NerveExamCounts? = nil,
         streak: Int,
         last14Days: [Int]
     ) {
@@ -47,6 +51,7 @@ public struct HeroData: Equatable, Hashable, Sendable {
         self.newTotal = max(newTotal ?? newCount, newCount)
         self.againCount = againCount
         self.longAnswers = longAnswers
+        self.nerveExam = nerveExam
         self.streak = streak
         self.last14Days = last14Days
     }
@@ -61,6 +66,24 @@ public struct HeroData: Equatable, Hashable, Sendable {
         public init(waiting: Int, required: Int) {
             self.waiting = max(waiting, required)
             self.required = required
+        }
+    }
+
+    /// The Peripheral Nerve Examination deck's own Reviews and New: extra,
+    /// never part of today's minimum.
+    public struct NerveExamCounts: Equatable, Hashable, Sendable {
+        /// Due cards not yet seen today.
+        public let reviews: Int
+        /// New cards left today, within the deck's limit.
+        public let newCount: Int
+        /// Cards seen today that are due again: what Reviews offers once
+        /// `reviews` is done.
+        public let again: Int
+
+        public init(reviews: Int, newCount: Int, again: Int = 0) {
+            self.reviews = reviews
+            self.newCount = newCount
+            self.again = again
         }
     }
 
@@ -79,6 +102,7 @@ public struct HeroData: Equatable, Hashable, Sendable {
             newTotal: newTotal,
             againCount: againCount,
             longAnswers: longAnswers,
+            nerveExam: nerveExam,
             streak: streak,
             last14Days: last14Days
         )

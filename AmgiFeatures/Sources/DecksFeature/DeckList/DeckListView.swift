@@ -86,6 +86,9 @@ package struct DeckListView: View {
             onStartReviews: { Task { await startStudyNow(.reviews) } },
             onStartNew: { Task { await startStudyNow(.newCards) } },
             onStartLongAnswers: { startLongAnswers() },
+            onStartNerveExam: { newCards in
+                Task { await startStudyNow(newCards ? .nerveExamNew : .nerveExamReviews) }
+            },
             onTapDeck: { row in pendingDeck = row.asDeckInfo },
             onDeleteDeck: { rawID in await model.delete(DeckID(rawID)) },
             onRenameDeck: { row in renameTarget = row },

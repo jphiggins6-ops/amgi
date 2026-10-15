@@ -37,7 +37,7 @@ import ReviewFeature
         #expect(spec.id == DeckID(0), "no Study Now deck yet, so one is created")
         #expect(spec.name == "Study Now")
         #expect(spec.searchTerms == [
-            FilteredDeckSearchTerm(search: "is:due flag:0 -deck:p -\"deck:Long Answers\" -rated:1", limit: 9999, order: .random)
+            FilteredDeckSearchTerm(search: "is:due flag:0 -deck:p -\"deck:Long Answers\" \(NerveExam.excluded) -rated:1", limit: 9999, order: .random)
         ])
         #expect(spec.reschedule, "answers must count as they would in the card's home deck")
     }
@@ -58,7 +58,7 @@ import ReviewFeature
         }
 
         #expect(specs.all.first?.searchTerms == [
-            FilteredDeckSearchTerm(search: "rated:1 is:due flag:0 -deck:p -\"deck:Long Answers\"", limit: 9999, order: .random)
+            FilteredDeckSearchTerm(search: "rated:1 is:due flag:0 -deck:p -\"deck:Long Answers\" \(NerveExam.excluded)", limit: 9999, order: .random)
         ])
     }
 
@@ -126,7 +126,7 @@ import ReviewFeature
         let spec = try #require(specs.all.first)
         #expect(spec.id == DeckID(12))
         #expect(spec.searchTerms == [
-            FilteredDeckSearchTerm(search: "cid:11,13,40", limit: 3, order: .random)
+            FilteredDeckSearchTerm(search: "cid:11,13,40 \(NerveExam.excluded)", limit: 3, order: .random)
         ])
         #expect(spec.reschedule)
     }
@@ -203,6 +203,29 @@ import ReviewFeature
         #expect(today.longRequired == 2)
         #expect(!today.isDone)
         #expect(DeckListModel.reviewsRoundSearch.contains(LongAnswers.excluded))
+    }
+
+    @Test func peripheralNerveExaminationIsFoundAnywhereAndLeftOutOfTheDay() {
+        let nested = DeckTreeNode(
+            id: DeckID(30), name: "Peripheral Nerve Examination",
+            fullName: "Neuro::Peripheral Nerve Examination",
+            counts: DeckCounts(newCount: 4, learnCount: 0, reviewCount: 0)
+        )
+        let neuro = DeckTreeNode(
+            id: DeckID(3), name: "Neuro", fullName: "Neuro",
+            counts: DeckCounts(newCount: 10, learnCount: 0, reviewCount: 0),
+            children: [nested]
+        )
+        let tree = [neuro, Self.deck(1, "Korean", new: 8)]
+        #expect(DeckListModel.nerveExamDeck(in: tree)?.id == DeckID(30))
+        #expect(DeckListModel.nerveExamNewInOtherDecks(tree) == 4, "its new cards come off Neuro's for the New button")
+        for search in [
+            DeckListModel.reviewsRoundSearch, DeckListModel.dueAgainSearch,
+            DeckListModel.reviewsDoneTodaySearch, DeckListModel.newCardsLearnedTodaySearch,
+        ] {
+            #expect(search.contains(NerveExam.excluded))
+        }
+        #expect(!DeckListModel.offersNewCards(Self.deck(5, "Peripheral Nerve Examination", new: 3)))
     }
 
     @Test func reviewsOpensTodaysFirstLookWhileAnyCardsAreLeft() async throws {
