@@ -69,6 +69,13 @@ public struct DeckListRowView: View {
             }
             .tint(.orange)
         }
+        // Each row is a list row of its own, so its menu is its own deck's.
+        .contextMenu {
+            Button { onRename() } label: { Label("Rename", systemImage: "pencil") }
+            Button(role: .destructive, action: onDelete) {
+                Label("Delete", systemImage: "trash")
+            }
+        }
     }
 
     private var metaLine: String {

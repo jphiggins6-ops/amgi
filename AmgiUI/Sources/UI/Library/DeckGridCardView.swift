@@ -43,40 +43,57 @@ public struct DeckGridCardView: View {
     }
 
     public var body: some View {
-        Button(action: onTap) {
-            AmgiCard(
-                background: isSelected ? .solid(palette.accentSoft) : .surfaceElevated,
-                shadow: palette.shadows.sm,
-                cornerRadius: AmgiRadius.hero,
-                contentInsets: EdgeInsets(
-                    top: AmgiSpacing.md, leading: AmgiSpacing.md,
-                    bottom: AmgiSpacing.md, trailing: AmgiSpacing.md
-                )
-            ) {
-                VStack(alignment: .leading, spacing: AmgiSpacing.sm) {
-                    header
+        // Not a Button with a context menu: the grid's cards all sit in one
+        // list row, whose long-press menu was always the first card's, so
+        // Delete took the top deck. The ⋯ menu is each card's own.
+        AmgiCard(
+            background: isSelected ? .solid(palette.accentSoft) : .surfaceElevated,
+            shadow: palette.shadows.sm,
+            cornerRadius: AmgiRadius.hero,
+            contentInsets: EdgeInsets(
+                top: AmgiSpacing.md, leading: AmgiSpacing.md,
+                bottom: AmgiSpacing.md, trailing: AmgiSpacing.md
+            )
+        ) {
+            VStack(alignment: .leading, spacing: AmgiSpacing.sm) {
+                header
+                HStack(alignment: .center, spacing: AmgiSpacing.xs) {
                     naming
-                    Spacer(minLength: 0)
-                    CountSplitBar(
-                        newCount: data.newCount,
-                        learnCount: data.learnCount,
-                        reviewCount: data.reviewCount
-                    )
+                    moreMenu
                 }
-                .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
+                Spacer(minLength: 0)
+                CountSplitBar(
+                    newCount: data.newCount,
+                    learnCount: data.learnCount,
+                    reviewCount: data.reviewCount
+                )
             }
-            .contentShape(Rectangle())
+            .frame(maxWidth: .infinity, minHeight: 88, alignment: .leading)
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onTap)
+        .accessibilityElement(children: .contain)
         .accessibilityLabel("\(data.name), \(accessibilityCounts)")
-        .accessibilityAddTraits(isSelected ? .isSelected : [])
-        .contextMenu {
+        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction(.default, onTap)
+    }
+
+    private var moreMenu: some View {
+        Menu {
             Button { onRename() } label: { Label("Rename", systemImage: "pencil") }
             // The list asks first (`onDelete`), naming this deck.
             Button(role: .destructive, action: onDelete) {
                 Label("Delete", systemImage: "trash")
             }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.system(size: 20))
+                .foregroundStyle(palette.textSecondary)
+                .frame(width: 32, height: 32)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.borderless)
+        .accessibilityLabel("Rename or delete \(data.name)")
     }
 
     private var header: some View {

@@ -29,7 +29,7 @@ What Amgi does today. For how it is put together, see [ARCHITECTURE.md](ARCHITEC
 ## Decks
 
 - **Hierarchical deck tree** — recursive expand/collapse with new/learning/review count badges on every node, as a list or a grid.
-- **Rename and delete** — swipe a deck in the list (or long-press it in the grid) to rename or delete it. Delete asks first, naming the deck and how many subdecks go with it.
+- **Rename and delete** — swipe a deck in the list, or long-press it, to rename or delete it; in the grid, each card's ⋯ button does it. Delete asks first, naming the deck and how many subdecks go with it.
 - **Deck detail** — per-deck counts, retention, average cards/day, mature card count, and subdeck breakdown.
 - **Per-deck study options** — FSRS weights editor with optimizer and simulator, preset CRUD, Easy Days, bury rules, review timer, auto-advance.
 - **Custom study and filtered decks** — extend today's new-card and review limits per deck, and rebuild or empty a filtered deck to return its cards to their home decks.
